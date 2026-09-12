@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { campaigns, organizations } from "@/lib/db/schema";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { PLANS, DEFAULT_PLAN, isPlanId, type PlanId } from "./plans";
 
 export class QuotaExceededError extends Error {
@@ -44,7 +44,16 @@ export async function assertCanCreateCampaign(organizationId: string): Promise<v
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)` })
     .from(campaigns)
-    .where(and(eq(campaigns.organizationId, organizationId), gte(campaigns.createdAt, periodStart)));
+    .where(
+      and(
+        eq(campaigns.organizationId, organizationId),
+        gte(campaigns.createdAt, periodStart),
+        // A campaign that failed (bad API key, model error, etc.) never
+        // consumed the resources the quota exists to cap -- don't charge
+        // the org's monthly allowance for it.
+        ne(campaigns.status, "failed")
+      )
+    );
 
   if (count >= plan.campaignsPerMonth) {
     throw new QuotaExceededError(planId, plan.campaignsPerMonth, count);

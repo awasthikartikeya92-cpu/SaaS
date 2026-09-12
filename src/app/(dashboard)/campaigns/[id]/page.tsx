@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { OpportunityScore } from "@/components/dashboard/score-bar";
 import { TierBadge } from "@/components/dashboard/tier-badge";
+import { RefreshButton } from "@/components/dashboard/refresh-button";
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,29 +26,32 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="font-[var(--font-display)] text-2xl">{campaign.name}</h1>
-          <Badge
-            variant={
-              campaign.status === "active"
-                ? "positive"
-                : campaign.status === "failed" || failedWhileGenerating
-                  ? "negative"
-                  : campaign.status === "generating"
-                    ? "accent"
-                    : "neutral"
-            }
-          >
-            {campaign.status === "generating" && failedWhileGenerating ? "failed" : campaign.status}
-          </Badge>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="font-[var(--font-display)] text-2xl">{campaign.name}</h1>
+            <Badge
+              variant={
+                campaign.status === "active"
+                  ? "positive"
+                  : campaign.status === "failed" || failedWhileGenerating
+                    ? "negative"
+                    : campaign.status === "generating"
+                      ? "accent"
+                      : "neutral"
+              }
+            >
+              {campaign.status === "generating" && failedWhileGenerating ? "failed" : campaign.status}
+            </Badge>
+          </div>
+          {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
         </div>
-        {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
+        {campaign.status === "generating" && !failedWhileGenerating && <RefreshButton />}
       </div>
 
       {campaign.status === "generating" && !failedWhileGenerating && (
         <Card><CardContent className="pt-5 text-sm text-ink-soft">
-          Running the agent pipeline -- Offering, ICP, Signal Taxonomy, Research, Scoring. Refresh in a moment.
+          Running the agent pipeline -- Offering, ICP, Signal Taxonomy, Research, Scoring. Click Refresh above in a moment.
         </CardContent></Card>
       )}
 
