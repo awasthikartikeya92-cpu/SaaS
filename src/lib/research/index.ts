@@ -1,5 +1,6 @@
 import type { ResearchProvider } from "./provider";
 import { MockResearchProvider } from "./mock-provider";
+import { TavilyProvider } from "./tavily-provider";
 
 let cached: ResearchProvider | null = null;
 
@@ -9,12 +10,14 @@ export function getResearchProvider(): ResearchProvider {
 
   if (providerName === "mock") {
     cached = new MockResearchProvider();
+  } else if (providerName === "tavily") {
+    const key = process.env.TAVILY_API_KEY;
+    if (!key) throw new Error("TAVILY_API_KEY is not set.");
+    cached = new TavilyProvider(key);
   } else {
-    // Phase 2: register real providers (Tavily/Exa/Serper) here behind the
-    // same ResearchProvider interface.
-    throw new Error(
-      `Research provider "${providerName}" is not implemented yet -- Phase 1 ships "mock" only.`
-    );
+    // Exa/Serper (or another provider) go here behind the same
+    // ResearchProvider interface -- nothing above this layer changes.
+    throw new Error(`Research provider "${providerName}" is not implemented yet.`);
   }
   return cached;
 }
