@@ -40,6 +40,11 @@ export async function runOfferingAgent(input: OfferingAgentInput): Promise<Offer
       },
     ],
     model: getModelForAgent("offering-agent"),
+    // Default 4096 risks truncating mid-JSON on a detailed offering with
+    // several personas -- a truncated response is indistinguishable from a
+    // malformed one to the parser and fails just the same way. Headroom
+    // costs nothing extra: max_tokens is a ceiling, not a floor.
+    maxTokens: 8192,
   });
   return parseJson(raw, OfferingDnaSchema);
 }

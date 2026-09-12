@@ -31,6 +31,40 @@ import { recordAiUsageEvent } from "@/lib/billing/usage-tracking";
 // through this sink when it runs inside the withAiUsageContext() below.
 setAiUsageSink(recordAiUsageEvent);
 
+// Bounds both cost and wall-clock time. The mock provider always returned
+// exactly 6 companies, so this never mattered before; a real research
+// provider (Tavily) can return anywhere from 0 to several dozen distinct
+// companies, and each one costs 2 sequential-feeling LLM calls (Contact +
+// GTM) -- unbounded, that's easily more total work than the generate
+// route's 60s budget (see maxDuration there) allows. When there are more
+// candidates than this, the ones with the most corroborating evidence go
+// first -- see the sort before the slice below.
+const MAX_ACCOUNTS_PER_CAMPAIGN = Number(process.env.MAX_ACCOUNTS_PER_CAMPAIGN || 10);
+
+// How many accounts to run Contact+GTM for at once. Sequential would be
+// safest against rate limits but, combined with the account cap above,
+// still risks exceeding the time budget (10 accounts x ~10s each is
+// already the whole budget on its own). Concurrency this low stays well
+// under any real Anthropic rate limit while cutting wall-clock time
+// roughly proportionally.
+const ACCOUNT_CONCURRENCY = 3;
+
+/** Runs `worker` over `items` with at most `concurrency` in flight at once. */
+async function processWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  let cursor = 0;
+  async function runNext(): Promise<void> {
+    const index = cursor++;
+    if (index >= items.length) return;
+    await worker(items[index]);
+    return runNext();
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => runNext()));
+}
+
 async function logRun(
   campaignId: string,
   agent: string,
@@ -189,123 +223,152 @@ async function runPipeline(campaign: typeof campaigns.$inferSelect, campaignId: 
     byCompany.get(v.companyName)!.push(v);
   }
 
-  for (const [companyName, signalsForCompany] of byCompany) {
-    const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
-    const [account] = await db
-      .insert(accounts)
+  // Most-corroborated companies first, then cap -- see MAX_ACCOUNTS_PER_CAMPAIGN.
+  const companiesToProcess = [...byCompany.entries()]
+    .sort(([, a], [, b]) => b.length - a.length)
+    .slice(0, MAX_ACCOUNTS_PER_CAMPAIGN);
+
+  await processWithConcurrency(companiesToProcess, ACCOUNT_CONCURRENCY, async ([companyName, signalsForCompany]) => {
+    try {
+      await processAccount(campaign, campaignId, companyName, signalsForCompany, icp, offeringDna, taxonomy, researchRunId);
+    } catch (err) {
+      // One account's failure (a model error, a JSON parse failure, etc.)
+      // must not sink every other account already in flight or still
+      // queued -- logRun already recorded the specific agent/error for
+      // this company in research_runs; this is just the safety net that
+      // keeps the rest of the campaign going instead of the whole
+      // pipeline throwing and the campaign becoming "failed" over one bad
+      // account out of possibly ten.
+      console.error(`[orchestrator] account "${companyName}" failed, continuing with the rest:`, err);
+    }
+  });
+}
+
+async function processAccount(
+  campaign: typeof campaigns.$inferSelect,
+  campaignId: string,
+  companyName: string,
+  signalsForCompany: VerifiedSignal[],
+  icp: IcpProfile,
+  offeringDna: OfferingDna,
+  taxonomy: { signals: { name: string; tier: 1 | 2 | 3; description: string }[] },
+  researchRunId: string
+) {
+  const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
+  const [account] = await db
+    .insert(accounts)
+    .values({
+      campaignId,
+      companyName,
+      website: signalsForCompany[0].companyWebsite ?? null,
+      industry,
+    })
+    .returning();
+
+  for (const sig of signalsForCompany) {
+    const [sourceRow] = await db
+      .insert(researchSources)
       .values({
-        campaignId,
-        companyName,
-        website: signalsForCompany[0].companyWebsite ?? null,
-        industry,
+        researchRunId,
+        url: sig.sourceUrl,
+        publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+        excerpt: sig.evidence,
       })
       .returning();
 
-    for (const sig of signalsForCompany) {
-      const [sourceRow] = await db
-        .insert(researchSources)
-        .values({
-          researchRunId,
-          url: sig.sourceUrl,
-          publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-          excerpt: sig.evidence,
-        })
-        .returning();
-
-      const matchedTaxonomyEntry = taxonomy.signals.find((t) =>
-        sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8))
-      );
-
-      await db.insert(accountSignals).values({
-        accountId: account.id,
-        signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
-        tier: matchedTaxonomyEntry?.tier ?? 3,
-        strength: sig.confidence * 100,
-        confidence: sig.confidence,
-        detectedAt: new Date(sig.detectedAt),
-        publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-        verified: sig.verified,
-        evidence: sig.evidence,
-        sourceId: sourceRow.id,
-      });
-    }
-
-    // 6. Scoring -- deterministic, see lib/scoring
-    const icpFit = computeIcpFit({
-      industryMatch: industry && icp.industries.includes(industry) ? 90 : 45,
-      geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
-      sizeMatch: 65,
-      businessModelMatch: 65,
-      techEnvironmentMatch: 60,
-      problemRelevance: 70,
-    });
-
-    const intent = computeIntent(
-      signalsForCompany.map((s) => ({
-        tier: (taxonomy.signals.find((t) => t.name === s.signalHint)?.tier ?? 3) as 1 | 2 | 3,
-        strength: s.confidence * 100,
-        confidence: s.confidence,
-        detectedAt: new Date(s.detectedAt),
-      }))
+    const matchedTaxonomyEntry = taxonomy.signals.find((t) =>
+      sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8))
     );
 
-    // 7. Contact Agent -- never a verified name in Phase 1 (mock provider has
-    // no person-level data), always a recommended title.
-    const { output: contactOut } = await logRun(
-      campaignId,
-      "contact-agent",
-      () => runContactAgent({ companyName, industry, offeringDna, icp }),
-      campaign.organizationId
-    );
-    const contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
-
-    await db.insert(contacts).values({
+    await db.insert(accountSignals).values({
       accountId: account.id,
-      name: contact.name,
-      title: contact.title,
-      isVerified: false,
-      confidence: contact.confidence,
-      relevance: contact.relevance,
-    });
-
-    const reachability = computeReachability({
-      decisionMakerIdentified: false,
-      roleRelevance: 80,
-      contactConfidence: contact.confidence,
-    });
-
-    const opportunity = computeOpportunityScore(icpFit, intent, reachability);
-
-    await db.insert(accountScores).values({
-      accountId: account.id,
-      icpFit,
-      intent,
-      reachability,
-      opportunity,
-    });
-
-    // 8. GTM Strategist
-    const { output: outreachOut } = await logRun(
-      campaignId,
-      "gtm-agent",
-      () =>
-        runGtmAgent({
-          companyName,
-          signals: signalsForCompany,
-          offeringDna,
-          recommendedTitle: contact.title,
-        }),
-      campaign.organizationId
-    );
-    const outreach = outreachOut as Awaited<ReturnType<typeof runGtmAgent>>;
-
-    await db.insert(outreachRecommendations).values({
-      accountId: account.id,
-      angle: outreach.angle,
-      talkingPoints: outreach.talkingPoints,
-      draftEmail: outreach.draftEmail,
-      draftLinkedIn: outreach.draftLinkedIn,
-      callOpener: outreach.callOpener,
+      signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
+      tier: matchedTaxonomyEntry?.tier ?? 3,
+      strength: sig.confidence * 100,
+      confidence: sig.confidence,
+      detectedAt: new Date(sig.detectedAt),
+      publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+      verified: sig.verified,
+      evidence: sig.evidence,
+      sourceId: sourceRow.id,
     });
   }
+
+  // 6. Scoring -- deterministic, see lib/scoring
+  const icpFit = computeIcpFit({
+    industryMatch: industry && icp.industries.includes(industry) ? 90 : 45,
+    geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
+    sizeMatch: 65,
+    businessModelMatch: 65,
+    techEnvironmentMatch: 60,
+    problemRelevance: 70,
+  });
+
+  const intent = computeIntent(
+    signalsForCompany.map((s) => ({
+      tier: (taxonomy.signals.find((t) => t.name === s.signalHint)?.tier ?? 3) as 1 | 2 | 3,
+      strength: s.confidence * 100,
+      confidence: s.confidence,
+      detectedAt: new Date(s.detectedAt),
+    }))
+  );
+
+  // 7. Contact Agent -- never a verified name in Phase 1 (mock provider has
+  // no person-level data), always a recommended title.
+  const { output: contactOut } = await logRun(
+    campaignId,
+    "contact-agent",
+    () => runContactAgent({ companyName, industry, offeringDna, icp }),
+    campaign.organizationId
+  );
+  const contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
+
+  await db.insert(contacts).values({
+    accountId: account.id,
+    name: contact.name,
+    title: contact.title,
+    isVerified: false,
+    confidence: contact.confidence,
+    relevance: contact.relevance,
+  });
+
+  const reachability = computeReachability({
+    decisionMakerIdentified: false,
+    roleRelevance: 80,
+    contactConfidence: contact.confidence,
+  });
+
+  const opportunity = computeOpportunityScore(icpFit, intent, reachability);
+
+  await db.insert(accountScores).values({
+    accountId: account.id,
+    icpFit,
+    intent,
+    reachability,
+    opportunity,
+  });
+
+  // 8. GTM Strategist
+  const { output: outreachOut } = await logRun(
+    campaignId,
+    "gtm-agent",
+    () =>
+      runGtmAgent({
+        companyName,
+        signals: signalsForCompany,
+        offeringDna,
+        recommendedTitle: contact.title,
+      }),
+    campaign.organizationId
+  );
+  const outreach = outreachOut as Awaited<ReturnType<typeof runGtmAgent>>;
+
+  await db.insert(outreachRecommendations).values({
+    accountId: account.id,
+    angle: outreach.angle,
+    talkingPoints: outreach.talkingPoints,
+    draftEmail: outreach.draftEmail,
+    draftLinkedIn: outreach.draftLinkedIn,
+    callOpener: outreach.callOpener,
+  });
 }

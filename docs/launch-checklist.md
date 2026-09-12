@@ -7,6 +7,52 @@ worked through top to bottom.
 
 ## Already built in this pass
 
+- **Pipeline reliability pass**, prompted by the first real campaign runs
+  surfacing failure modes the 6-fixed-account mock provider never could:
+  - **Platform timeout** (`src/app/api/campaigns/[id]/generate/route.ts`):
+    added `maxDuration = 60`. Without it, Vercel kills the function at its
+    default (10s on Hobby) once real accounts replace the mock ones -- and
+    because that kill happens mid-flight, `runOrchestrator`'s own catch
+    block never runs, leaving the campaign stuck at "generating" instead
+    of cleanly "failed". This is likely the single biggest remaining
+    source of stuck campaigns if account volume grows -- see the account
+    cap below for the other half of the fix.
+  - **Tavily calls now run in parallel**, not sequentially -- 5 signals at
+    the old 15s timeout each could take 75s sequentially, longer than the
+    entire function's budget, on its own. Timeout also tightened to 10s.
+  - **Anthropic calls now have a 25s timeout** (`src/lib/ai/anthropic-provider.ts`)
+    -- same reasoning: a hung call must fail within the function's budget,
+    not run until the platform kills the whole thing.
+  - **Discovered accounts are capped and prioritized**
+    (`MAX_ACCOUNTS_PER_CAMPAIGN`, default 10, most-corroborated-evidence
+    first) and **processed with bounded concurrency** (3 at a time,
+    `src/lib/agents/orchestrator.ts`) instead of one at a time -- a real
+    research provider can return far more than 6 companies, and each one
+    costs 2 sequential-feeling LLM calls; unbounded and sequential, that
+    easily exceeds the time budget on its own.
+  - **One account's failure no longer sinks the whole campaign** -- each
+    account is now wrapped in its own try/catch inside the concurrency
+    pool, so a model error or bad JSON on account #4 doesn't stop accounts
+    #1-3 (already done) or #5-10 (still queued) from completing.
+  - **Zod schemas hardened** (`src/lib/agents/schemas.ts`) against real
+    LLM formatting variance: stringified numbers ("200000" instead of
+    200000), confidence given on a 0-100 scale instead of 0-1, a field
+    omitted entirely instead of written as `null`, and a wrong-shaped
+    array (string instead of `string[]`) all now degrade gracefully
+    instead of failing the agent. Required identity fields (a title, an
+    angle, `coreProblem`) are deliberately left strict -- those failing is
+    a real problem worth surfacing, not something to paper over.
+  - **maxTokens raised to 8192** for Offering and GTM (the two
+    longest-output agents) -- the old 4096 default risked truncating
+    valid JSON mid-object on a detailed offering or a long draft email,
+    which failed identically to a genuinely malformed response.
+  - Still an open, structural risk even after all of the above: a large
+    enough discovered-account universe can still exceed even a 60s budget
+    (Vercel's Hobby ceiling) run through a single HTTP request. If that
+    happens in practice, the real fix is decoupling generation from the
+    request/response cycle entirely (a background job/queue), not another
+    round of tuning constants -- worth raising `maxDuration` if you're on
+    Pro (up to 300s, more with Fluid compute) as a stopgap first.
 - **AI usage instrumentation** (`src/lib/ai/usage-context.ts`,
   `src/lib/billing/usage-tracking.ts`, `ai_usage_events` table): every
   Anthropic call made through the orchestrator now logs exact input/output

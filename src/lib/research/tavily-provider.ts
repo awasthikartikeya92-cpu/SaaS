@@ -20,12 +20,20 @@ import type { ResearchProvider, ResearchQuery, RawEvidence } from "./provider";
 
 const TAVILY_SEARCH_URL = "https://api.tavily.com/search";
 const RESULTS_PER_QUERY = 5;
-const REQUEST_TIMEOUT_MS = 15_000;
+// Tight on purpose: the whole generate request has a 60s budget
+// (see maxDuration in the generate route) shared with several sequential
+// Anthropic calls before and after this step. Run sequentially at the old
+// 15s timeout and 5 queries alone could take 75s -- longer than the entire
+// function is allowed to run. Queries run in parallel below specifically
+// so the wall-clock cost of this step is close to one query's latency,
+// not the sum of all of them.
+const REQUEST_TIMEOUT_MS = 10_000;
 
 // How many of the signal taxonomy's signals to actually search for per
-// research run. Each one is a separate Tavily call, so this bounds both
-// latency (they run sequentially below) and API usage against the free
-// tier -- raise it once you've seen real usage and know you have headroom.
+// research run. Each one is a separate Tavily call -- bounds API usage
+// against the free tier and (now that queries run in parallel) the number
+// of concurrent requests. Raise it once you've seen real usage and know
+// you have headroom on both.
 const MAX_SIGNALS_PER_RUN = Number(process.env.TAVILY_MAX_SIGNALS_PER_RUN || 5);
 
 interface TavilyResult {
@@ -45,23 +53,23 @@ export class TavilyProvider implements ResearchProvider {
 
   async search(query: ResearchQuery): Promise<RawEvidence[]> {
     const signals = query.signalNames.slice(0, MAX_SIGNALS_PER_RUN);
-    const evidence: RawEvidence[] = [];
 
-    // Sequential, not Promise.all -- keeps this within Tavily's rate limits
-    // and makes a single failing query's error easy to attribute in logs.
-    for (const signalName of signals) {
-      try {
-        const results = await this.searchOne(buildQuery(signalName, query));
-        for (const result of results) {
-          const parsed = parseResult(result, signalName);
-          if (parsed) evidence.push(parsed);
-        }
-      } catch (err) {
-        console.error(`[tavily] search failed for signal "${signalName}":`, err);
-        // Continue with the other signals rather than failing the whole
-        // research run over one bad query -- partial evidence is still
-        // useful, and the orchestrator/verification agent already handle
-        // a smaller-than-expected evidence set gracefully.
+    // Parallel, not sequential -- see the REQUEST_TIMEOUT_MS comment above.
+    // allSettled (not all) so one failing/slow query doesn't sink the
+    // others; each query already has its own timeout via searchOne.
+    const results = await Promise.allSettled(
+      signals.map((signalName) => this.searchOne(buildQuery(signalName, query)).then((r) => ({ signalName, r })))
+    );
+
+    const evidence: RawEvidence[] = [];
+    for (const result of results) {
+      if (result.status === "rejected") {
+        console.error("[tavily] search failed for a signal:", result.reason);
+        continue; // partial evidence is still useful -- see logRun's own handling downstream
+      }
+      for (const raw of result.value.r) {
+        const parsed = parseResult(raw, result.value.signalName);
+        if (parsed) evidence.push(parsed);
       }
     }
 

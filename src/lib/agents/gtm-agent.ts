@@ -28,6 +28,10 @@ export async function runGtmAgent(input: GtmAgentInput): Promise<OutreachRecomme
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
     model: getModelForAgent("gtm-agent"),
+    // Same reasoning as offering-agent.ts -- draftEmail/draftLinkedIn/
+    // callOpener together can run long enough to risk truncating the
+    // default 4096-token ceiling mid-JSON.
+    maxTokens: 8192,
   });
   return parseJson(raw, OutreachRecommendationSchema);
 }
