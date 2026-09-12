@@ -38,6 +38,34 @@ worked through top to bottom.
 
 ## What's still a manual step
 
+### 0. Remove the bootstrap deploy hack once the first deploy succeeds
+`package.json`'s `vercel-build` script currently runs
+`drizzle-kit push --force && (tsx scripts/seed.ts || true) && next build`
+instead of plain `next build`. This exists only because the sandbox this
+was built in can't make raw TCP connections (only HTTP/S through a proxy),
+so `db:push`/`db:seed` couldn't be run directly against Postgres — routing
+them through Vercel's build step (which has normal network access) was the
+only way to get the schema created and the demo account seeded. Two things
+to do once you've confirmed the first deploy works (signed in, campaign
+page loads):
+- Remove `vercel-build` from `package.json` entirely (falls back to the
+  plain `build` script). Leaving `--force` schema pushes wired into every
+  deploy risks silently truncating a column on some future schema change —
+  fine for bootstrapping an empty database, not for an ongoing app.
+- The seed step is guarded with `|| true` so a second deploy won't fail
+  outright, but it'll leave an orphaned duplicate "Ridgeline Ops (demo)"
+  organization row (no login) if it ever runs twice before you remove it —
+  worth a quick manual cleanup if that happens.
+
+### 0.5. There's no signup flow yet
+Found while wiring this up: the only way to get a user into the database
+right now is `scripts/seed.ts` — there's no `/register` route or page. That
+was invisible in Phase 1 because everything ran against the seeded demo
+account. This has to exist before a real stranger can use the product; it's
+a real feature to build (an API route + page, reusing the existing
+`bcryptjs` hashing and `organizations`/`users` tables), not a config
+change like everything else on this list.
+
 ### 1. Your own Anthropic key, in production
 - Set `ANTHROPIC_API_KEY` as a Vercel environment variable (never commit
   it). Every user — free and paid — runs through this one key.

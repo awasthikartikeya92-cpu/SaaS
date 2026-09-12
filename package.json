@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "drizzle-kit push --force && (tsx scripts/seed.ts || true) && next build",
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
