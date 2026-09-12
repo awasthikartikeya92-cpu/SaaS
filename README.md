@@ -73,6 +73,16 @@ invalid one, the campaign fails cleanly: it moves to `failed` status and
 the campaign page shows which agent failed and why, instead of sitting at
 "generating" forever.
 
+Generation itself runs as a resumable series of short steps
+(`POST /api/campaigns/[id]/step`, `src/lib/agents/orchestrator.ts`) rather
+than one long request -- the campaign page polls that endpoint and shows
+live progress (which stage, how many accounts are done). This exists
+because a free/Hobby Vercel plan hard-caps a serverless function at 60s
+with no way to raise it, and this pipeline's several real LLM calls can
+legitimately take longer than that combined; see
+`docs/launch-checklist.md` for the full reasoning. A full campaign visibly
+takes a few minutes as a result -- that's expected, not a hang.
+
 ## One deviation from the original spec -- and why
 
 The brief specified **PostgreSQL + Prisma** and the **shadcn/ui CLI**. Both

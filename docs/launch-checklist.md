@@ -7,7 +7,72 @@ worked through top to bottom.
 
 ## Already built in this pass
 
-- **Pipeline reliability pass**, prompted by the first real campaign runs
+- **Generation is now a resumable series of short steps, not one long
+  request** (`src/lib/agents/orchestrator.ts`, `POST /api/campaigns/[id]/step`,
+  `src/components/dashboard/generation-progress.tsx`). This supersedes the
+  entire "Pipeline reliability pass" below, which was a series of
+  increasingly narrow fixes (raise the timeout, cap accounts, bound
+  concurrency...) for one root problem: a free/Hobby Vercel plan gives a
+  serverless function a **hard, non-negotiable 60s ceiling**, and this
+  pipeline runs several sequential LLM calls before any account work even
+  starts -- 3 real calls at even a generous 40s timeout is 120s worst case,
+  already past that ceiling on its own, with no constant left to tune.
+  - `runNextStep(campaignId)` does exactly ONE bounded unit of work (one
+    agent call, essentially) per invocation and returns -- it's a state
+    machine, not a pipeline: it looks at what's already persisted
+    (`research_runs` rows for the shared offering/icp/signal/research
+    stages, `accounts.status` for the per-account Contact -> GTM leg) and
+    does whichever piece is next. No single call ever attempts more than
+    one real LLM request, so there's structurally nothing left for a
+    platform timeout to interrupt mid-pipeline.
+  - The campaign page's `GenerationProgress` client component calls this
+    endpoint in a loop (every step, immediately after the previous one
+    returns) while a campaign is `draft`/`generating`, and shows real,
+    persisted progress -- which stage, and "N of M accounts complete" --
+    instead of a spinner with no information behind it. No queue service,
+    no new Vercel add-on: the browser tab polling is what plays the role a
+    background worker would on a paid tier.
+  - `accounts` gained a `status` column (`pending` -> `contacted` -> `done`
+    | `failed`) that doubles as this leg's work queue -- a row is inserted
+    the moment research/verification identifies the company, before
+    Contact or GTM have run, so it's visible and fills in live rather than
+    the whole campaign staying blank until every account finishes.
+    `icpFit`/`intent` are computed and stored at that same moment (neither
+    depends on Contact); `reachability`/`opportunity` start at a `0`
+    placeholder and are filled in once Contact runs -- the UI shows a
+    status badge instead of a score for any account that isn't `done` yet,
+    so a placeholder `0` is never shown as if it were a real score.
+  - One account's Contact or GTM call failing still only fails that
+    account (caught locally, `failureReason` recorded, account marked
+    `failed`, the queue moves on) -- unchanged in spirit from the old
+    per-account try/catch, just re-homed into this new structure. An error
+    in one of the four *shared* stages (offering/icp/signal/research) has
+    no "other accounts" to preserve, so it still fails the whole campaign,
+    same as before.
+  - Guarded against a real race: two overlapping `step` calls for the same
+    campaign (a dev-mode double effect, two browser tabs open on the same
+    page) could otherwise both see a shared stage as "not started" and
+    both try to insert -- `offering_dna`/`icp_profiles`/`signal_taxonomies`
+    all have a UNIQUE constraint on `campaignId`, so the loser's insert
+    would throw and incorrectly fail the whole campaign over a harmless
+    race. `stageGate()` checks for an in-flight (`status: "running"`)
+    `research_runs` row first and just waits rather than restarting work
+    someone else already claimed.
+  - The old `POST /api/campaigns/[id]/generate` route (the one-shot,
+    whole-pipeline endpoint) is deleted, not just deprecated -- `step` is
+    the only way generation runs now.
+  - Trade-off, stated plainly: a full campaign now visibly takes minutes
+    (each of up to ~24 sequential steps for a 10-account campaign carries
+    its own real network/LLM latency) rather than racing to finish under a
+    minute. That's the honest cost of not exceeding a timeout that can't be
+    raised on this plan -- and it comes with real progress on screen the
+    whole time, instead of a coin-flip on whether a silent single request
+    finishes before Vercel kills it.
+
+- **Pipeline reliability pass** (superseded above, kept for history -- the
+  timeout/concurrency numbers below no longer apply to how generation runs,
+  but the schema-hardening and error-handling parts are still exactly as
+  described), prompted by the first real campaign runs
   surfacing failure modes the 6-fixed-account mock provider never could:
   - **Platform timeout** (`src/app/api/campaigns/[id]/generate/route.ts`):
     added `maxDuration = 60`. Without it, Vercel kills the function at its

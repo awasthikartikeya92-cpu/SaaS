@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getCampaignDetail } from "@/lib/db/queries";
+import { getCampaignDetail, getGenerationProgress } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -8,21 +8,23 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { OpportunityScore } from "@/components/dashboard/score-bar";
 import { TierBadge } from "@/components/dashboard/tier-badge";
 import { RefreshButton } from "@/components/dashboard/refresh-button";
+import { GenerationProgress } from "@/components/dashboard/generation-progress";
+
+const ACCOUNT_STATUS_LABEL: Record<string, string> = {
+  pending: "Queued",
+  contacted: "Scoring...",
+  done: "Done",
+  failed: "Failed",
+};
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await getCampaignDetail(id);
-  if (!data) notFound();
+  const [data, progress] = await Promise.all([getCampaignDetail(id), getGenerationProgress(id)]);
+  if (!data || !progress) notFound();
 
   const { campaign, offeringDna, personas, icp, signals, accounts, latestRun } = data;
 
-  // A campaign stuck at "generating" from before the orchestrator tracked
-  // failure as its own status (see src/lib/agents/orchestrator.ts) looks
-  // the same as one that's genuinely still running, unless its most recent
-  // research_runs row already recorded an error -- treat that the same as
-  // an explicit "failed" status rather than showing "refresh in a moment"
-  // forever.
-  const failedWhileGenerating = campaign.status === "generating" && latestRun?.status === "error";
+  const stillGenerating = campaign.status === "draft" || campaign.status === "generating";
 
   // The failure card's hint used to always say "usually a missing/invalid
   // ANTHROPIC_API_KEY" no matter what actually failed -- misleading for a
@@ -45,28 +47,39 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               variant={
                 campaign.status === "active"
                   ? "positive"
-                  : campaign.status === "failed" || failedWhileGenerating
+                  : campaign.status === "failed"
                     ? "negative"
-                    : campaign.status === "generating"
+                    : stillGenerating
                       ? "accent"
                       : "neutral"
               }
             >
-              {campaign.status === "generating" && failedWhileGenerating ? "failed" : campaign.status}
+              {stillGenerating ? "generating" : campaign.status}
             </Badge>
           </div>
           {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
         </div>
-        {campaign.status === "generating" && !failedWhileGenerating && <RefreshButton />}
+        {campaign.status === "failed" && <RefreshButton />}
       </div>
 
-      {campaign.status === "generating" && !failedWhileGenerating && (
-        <Card><CardContent className="pt-5 text-sm text-ink-soft">
-          Running the agent pipeline -- Offering, ICP, Signal Taxonomy, Research, Scoring. Click Refresh above in a moment.
-        </CardContent></Card>
+      {stillGenerating && <GenerationProgress campaignId={id} initial={progress} />}
+
+      {campaign.status === "active" && progress.failedAccounts.length > 0 && (
+        <Card>
+          <CardContent className="pt-5 text-sm">
+            <p className="font-medium text-ink">
+              {progress.failedAccounts.length} of {progress.accountsTotal} account
+              {progress.accountsTotal === 1 ? "" : "s"} couldn&apos;t be fully processed.
+            </p>
+            <p className="mt-1 text-xs text-ink-soft">
+              Everything else below completed normally -- one account failing doesn&apos;t affect the others.
+              Affected: {progress.failedAccounts.map((a) => a.companyName).join(", ")}.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
-      {(campaign.status === "failed" || failedWhileGenerating) && (
+      {campaign.status === "failed" && (
         <Card>
           <CardContent className="pt-5 text-sm">
             <p className="font-medium text-negative">Generation failed{latestRun ? ` at ${latestRun.agent}` : ""}.</p>
@@ -78,14 +91,30 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
             <p className="mt-3 text-xs text-ink-soft">
               {failureHint} Create a new campaign to try again -- there&apos;s no retry for this one yet.
             </p>
+            {(progress.stages.offering === "success" ||
+              progress.stages.icp === "success" ||
+              progress.stages.signal === "success" ||
+              progress.stages.research === "success" ||
+              progress.accountsTotal > 0) && (
+              <div className="mt-4 border-t border-line pt-3">
+                <p className="text-xs font-medium text-ink-soft">What already completed before this failure:</p>
+                <ul className="mt-1.5 flex flex-col gap-0.5 text-xs text-ink-soft">
+                  <li>Offering DNA: {progress.stages.offering === "success" ? "done" : "not reached"}</li>
+                  <li>ICP: {progress.stages.icp === "success" ? "done" : "not reached"}</li>
+                  <li>Signal taxonomy: {progress.stages.signal === "success" ? "done" : "not reached"}</li>
+                  <li>Research: {progress.stages.research === "success" ? "done" : "not reached"}</li>
+                  {progress.accountsTotal > 0 && (
+                    <li>
+                      Accounts: {progress.accountsDone} of {progress.accountsTotal} processed
+                      {progress.failedAccounts.length > 0 &&
+                        ` (${progress.failedAccounts.length} failed: ${progress.failedAccounts.map((a) => a.companyName).join(", ")})`}
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
           </CardContent>
         </Card>
-      )}
-
-      {campaign.status === "draft" && (
-        <Card><CardContent className="pt-5 text-sm text-ink-soft">
-          This campaign hasn&apos;t been generated yet.
-        </CardContent></Card>
       )}
 
       <Tabs defaultValue="accounts">
@@ -119,7 +148,19 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                     <TableCell className="text-ink-soft">{a.industry ?? "--"}</TableCell>
                     <TableCell className="text-right font-[var(--font-data)]">{a.score?.icpFit.toFixed(0) ?? "--"}</TableCell>
                     <TableCell className="text-right font-[var(--font-data)]">{a.score?.intent.toFixed(0) ?? "--"}</TableCell>
-                    <TableCell className="text-right"><OpportunityScore value={a.score?.opportunity ?? 0} /></TableCell>
+                    <TableCell className="text-right">
+                      {/* opportunity depends on Contact/GTM, which haven't
+                          run yet for a "pending"/"contacted" account -- a
+                          real 0 there would look like a scored, low-priority
+                          account rather than an unfinished one. */}
+                      {a.status === "done" ? (
+                        <OpportunityScore value={a.score?.opportunity ?? 0} />
+                      ) : (
+                        <Badge variant={a.status === "failed" ? "negative" : "accent"}>
+                          {ACCOUNT_STATUS_LABEL[a.status] ?? a.status}
+                        </Badge>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

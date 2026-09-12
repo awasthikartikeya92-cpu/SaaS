@@ -15,6 +15,13 @@
       "when": 1789209333704,
       "tag": "0001_lazy_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789223887619,
+      "tag": "0002_special_speedball",
+      "breakpoints": true
     }
   ]
 }

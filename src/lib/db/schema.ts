@@ -124,6 +124,17 @@ export const accounts = pgTable("accounts", {
   industry: text("industry"),
   employeeCount: integer("employee_count"),
   geography: text("geography"),
+  // Per-account leg of the resumable generation pipeline (see
+  // src/lib/agents/orchestrator.ts). A row is inserted as "pending" as soon
+  // as research/verification identifies the company -- before Contact or
+  // GTM have run -- so the account is visible in the UI immediately and
+  // fills in as each step completes, instead of the whole campaign staying
+  // blank until every account finishes. "contacted" = contact-agent done,
+  // waiting on gtm-agent. "done"/"failed" are terminal for this account and
+  // are never revisited -- one account failing doesn't block or retry the
+  // others (see docs/launch-checklist.md).
+  status: text("status").notNull().default("pending"), // pending | contacted | done | failed
+  failureReason: text("failure_reason"),
   createdAt: createdAt(),
 });
 

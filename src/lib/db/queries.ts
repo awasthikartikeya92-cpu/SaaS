@@ -126,6 +126,81 @@ export async function getCampaignDetail(campaignId: string) {
   };
 }
 
+// Read-only summary of where a campaign's resumable generation is, without
+// doing any work itself -- used both for the campaign page's first
+// server-rendered paint (so there's no blank flash before the client's
+// first poll response) and, with the same shape, by
+// POST /api/campaigns/[id]/step after it performs one unit of work. Derived
+// entirely from persisted state (research_runs + accounts.status), never
+// from anything held in memory -- so it's correct even on a fresh page load
+// of a campaign someone else's browser tab has been driving.
+export type GenerationStage = "offering" | "icp" | "signal" | "research" | "accounts" | "complete";
+
+export interface GenerationProgress {
+  campaignStatus: string;
+  stage: GenerationStage;
+  stages: Record<"offering" | "icp" | "signal" | "research", "pending" | "running" | "success" | "error">;
+  accountsTotal: number;
+  accountsDone: number; // status "done" or "failed" -- i.e. no longer queued
+  failedAccounts: { companyName: string; reason: string | null }[];
+  lastError: string | null;
+}
+
+export async function getGenerationProgress(campaignId: string): Promise<GenerationProgress | null> {
+  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+  if (!campaign) return null;
+
+  const runs = await db
+    .select()
+    .from(researchRuns)
+    .where(eq(researchRuns.campaignId, campaignId))
+    .orderBy(desc(researchRuns.startedAt));
+
+  // `runs` is newest-first, so the first row seen per agent name is that
+  // agent's most recent attempt -- relevant for offering/icp/signal/research,
+  // which (unlike accounts) never retry within a campaign today, but this
+  // stays correct if that ever changes.
+  const latestByAgent = new Map<string, (typeof runs)[number]>();
+  for (const r of runs) if (!latestByAgent.has(r.agent)) latestByAgent.set(r.agent, r);
+  type RunStatus = "pending" | "running" | "success" | "error";
+  const stageStatus = (agent: string): RunStatus => {
+    const status = latestByAgent.get(agent)?.status;
+    return status === "running" || status === "success" || status === "error" ? status : "pending";
+  };
+
+  const campaignAccounts = await db.select().from(accounts).where(eq(accounts.campaignId, campaignId));
+  const accountsTotal = campaignAccounts.length;
+  const accountsDone = campaignAccounts.filter((a) => a.status === "done" || a.status === "failed").length;
+  const failedAccounts = campaignAccounts
+    .filter((a) => a.status === "failed")
+    .map((a) => ({ companyName: a.companyName, reason: a.failureReason }));
+
+  const stages = {
+    offering: stageStatus("offering-agent"),
+    icp: stageStatus("icp-agent"),
+    signal: stageStatus("signal-agent"),
+    research: stageStatus("research-agent"),
+  };
+
+  let stage: GenerationStage;
+  if (stages.offering !== "success") stage = "offering";
+  else if (stages.icp !== "success") stage = "icp";
+  else if (stages.signal !== "success") stage = "signal";
+  else if (stages.research !== "success") stage = "research";
+  else if (accountsDone < accountsTotal) stage = "accounts";
+  else stage = "complete";
+
+  return {
+    campaignStatus: campaign.status,
+    stage,
+    stages,
+    accountsTotal,
+    accountsDone,
+    failedAccounts,
+    lastError: runs.find((r) => r.status === "error")?.error ?? null,
+  };
+}
+
 export async function getAccountDetail(accountId: string) {
   const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
   if (!account) return null;

@@ -48,8 +48,10 @@ export default function NewCampaignPage() {
         throw new Error(typeof body?.error === "string" ? body.error : "Something went wrong.");
       }
       const { id } = await res.json();
-      // Fire-and-forget: kick off the agent pipeline, then go to the campaign page.
-      fetch(`/api/campaigns/${id}/generate`, { method: "POST" });
+      // Generation itself is kicked off by the campaign page (it starts
+      // polling POST /api/campaigns/[id]/step on mount) -- see
+      // src/components/dashboard/generation-progress.tsx. Nothing to
+      // trigger from here.
       router.push(`/campaigns/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
