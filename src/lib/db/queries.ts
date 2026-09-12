@@ -99,11 +99,12 @@ export async function getCampaignDetail(campaignId: string) {
     : [];
   const scoreByAccount = new Map(scores.map((s) => [s.accountId, s]));
 
-  // Most recent failed pipeline stage, if any -- lets the UI tell a stuck
-  // "generating" campaign apart from a genuinely failed one instead of
-  // saying "refresh in a moment" forever (see campaigns/[id]/page.tsx).
+  // Most recent pipeline run, if any -- lets the UI show which agent failed
+  // and why, for both a properly "failed" campaign (orchestrator.ts's own
+  // catch block) and a legacy campaign stuck at "generating" from before
+  // that existed (see campaigns/[id]/page.tsx).
   const [failedRun] =
-    campaign.status === "generating"
+    campaign.status === "generating" || campaign.status === "failed"
       ? await db
           .select()
           .from(researchRuns)
