@@ -84,6 +84,33 @@ laid out for it in the architecture doc.
   configurable -- the formula already reads from a config object, not
   inline literals, so that's a settings change later, not a refactor).
 
+**Billing/growth infrastructure, added ahead of a real launch:**
+- **AI usage instrumentation** -- every Anthropic call is logged (exact
+  token counts, per org/campaign/agent) to `ai_usage_events`, so real
+  cost-per-campaign is measurable instead of guessed. See
+  `src/lib/ai/usage-context.ts` and `src/lib/billing/usage-tracking.ts`.
+- **Free-tier quota enforcement** -- campaign creation is capped per org per
+  calendar month (`src/lib/billing/plans.ts` / `quota.ts`; default 3,
+  `FREE_PLAN_CAMPAIGNS_PER_MONTH` env-overridable), returning HTTP 402 with
+  the current usage when exceeded.
+- **Stripe billing scaffolding** (`/api/billing/checkout`, `/api/billing/webhook`)
+  -- dormant (returns 501) until `STRIPE_SECRET_KEY` is set, so this ships
+  without forcing a Stripe account today.
+- **Product analytics seam** (`src/lib/analytics/track.ts`) -- no-ops until
+  `POSTHOG_KEY` is set; call sites already exist at the events that matter
+  for activation/retention tracking.
+- **Production Postgres schema** (`src/lib/db/schema.postgres.ts`) -- mirrors
+  the SQLite schema table-for-table; typechecked and migration-SQL
+  generated, not yet run against a live database. Switch instructions are
+  at the top of that file.
+- **Legal drafts** (`legal/terms.md`, `legal/privacy.md`) -- founder-drafted
+  starting points, explicitly marked as needing attorney review.
+
+See `docs/launch-checklist.md` for exactly what's left as a manual,
+human-only step (provisioning Postgres, your own Anthropic key + a spend
+cap in the Anthropic Console, filling in real pricing once usage data
+exists, a Stripe account, legal review).
+
 ## Useful commands
 
 ```bash
@@ -92,6 +119,8 @@ npm run build         # production build (verified clean, no TS errors)
 npm run db:push        # push schema.ts changes to the SQLite DB
 npm run db:seed         # re-seed the demo campaign
 npm run db:reset          # wipe + push + seed in one step
+npm run db:generate:postgres  # generate migration SQL from schema.postgres.ts (no live DB needed)
+npm run db:push:postgres      # push schema.postgres.ts to a real Postgres DATABASE_URL
 ```
 
 ## Project layout

@@ -9,7 +9,9 @@
     "lint": "eslint",
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
-    "db:reset": "rm -f dev.db dev.db-* && npm run db:push && npm run db:seed"
+    "db:reset": "rm -f dev.db dev.db-* && npm run db:push && npm run db:seed",
+    "db:generate:postgres": "drizzle-kit generate --config=drizzle.config.postgres.ts",
+    "db:push:postgres": "drizzle-kit push --config=drizzle.config.postgres.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
@@ -33,9 +35,11 @@
     "lucide-react": "^1.45.0",
     "next": "16.3.4",
     "next-auth": "^5.0.0-beta.29",
+    "postgres": "^3.4.5",
     "prisma": "^5.22.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "stripe": "^17.4.0",
     "tailwind-merge": "^3.6.0",
     "zod": "^3.25.76"
   },

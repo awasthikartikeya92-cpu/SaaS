@@ -24,18 +24,25 @@ import { runContactAgent } from "./contact-agent";
 import { runGtmAgent } from "./gtm-agent";
 import { computeIcpFit, computeIntent, computeReachability, computeOpportunityScore } from "@/lib/scoring";
 import type { OfferingDna, IcpProfile } from "./schemas";
+import { setAiUsageSink, withAiUsageContext } from "@/lib/ai/usage-context";
+import { recordAiUsageEvent } from "@/lib/billing/usage-tracking";
+
+// Registered once per process. Every AiProvider.complete() call reports
+// through this sink when it runs inside the withAiUsageContext() below.
+setAiUsageSink(recordAiUsageEvent);
 
 async function logRun(
   campaignId: string,
   agent: string,
-  fn: () => Promise<unknown>
+  fn: () => Promise<unknown>,
+  organizationId: string
 ) {
   const [run] = await db
     .insert(researchRuns)
     .values({ campaignId, agent, status: "running", input: {} })
     .returning();
   try {
-    const output = await fn();
+    const output = await withAiUsageContext({ organizationId, campaignId, agent }, fn);
     await db
       .update(researchRuns)
       .set({ status: "success", output: output as object, finishedAt: new Date() })
@@ -73,7 +80,8 @@ export async function runOrchestrator(campaignId: string) {
       competitors: campaign.competitors ?? undefined,
       knownIcp: campaign.knownIcp ?? undefined,
       knownPersonas: campaign.knownPersonas ?? undefined,
-    })
+    }),
+    campaign.organizationId
   );
   const offeringDna = dna as OfferingDna;
 
@@ -108,7 +116,8 @@ export async function runOrchestrator(campaignId: string) {
       targetGeographies: campaign.targetGeographies,
       targetCompanySize: campaign.targetCompanySize ?? undefined,
       knownIcp: campaign.knownIcp ?? undefined,
-    })
+    }),
+    campaign.organizationId
   );
   const icp = icpOut as IcpProfile;
 
@@ -127,8 +136,11 @@ export async function runOrchestrator(campaignId: string) {
   });
 
   // 3. Signal Agent
-  const { output: taxonomyOut } = await logRun(campaignId, "signal-agent", () =>
-    runSignalAgent(offeringDna, icp)
+  const { output: taxonomyOut } = await logRun(
+    campaignId,
+    "signal-agent",
+    () => runSignalAgent(offeringDna, icp),
+    campaign.organizationId
   );
   const taxonomy = taxonomyOut as { signals: { name: string; tier: 1 | 2 | 3; description: string }[] };
 
@@ -146,7 +158,8 @@ export async function runOrchestrator(campaignId: string) {
   const { output: rawEvidenceOut, runId: researchRunId } = await logRun(
     campaignId,
     "research-agent",
-    () => runResearchAgent(taxonomy, icp)
+    () => runResearchAgent(taxonomy, icp),
+    campaign.organizationId
   );
   const rawEvidence = rawEvidenceOut as Awaited<ReturnType<typeof runResearchAgent>>;
 
@@ -222,8 +235,11 @@ export async function runOrchestrator(campaignId: string) {
 
     // 7. Contact Agent -- never a verified name in Phase 1 (mock provider has
     // no person-level data), always a recommended title.
-    const { output: contactOut } = await logRun(campaignId, "contact-agent", () =>
-      runContactAgent({ companyName, industry, offeringDna, icp })
+    const { output: contactOut } = await logRun(
+      campaignId,
+      "contact-agent",
+      () => runContactAgent({ companyName, industry, offeringDna, icp }),
+      campaign.organizationId
     );
     const contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
 
@@ -253,13 +269,17 @@ export async function runOrchestrator(campaignId: string) {
     });
 
     // 8. GTM Strategist
-    const { output: outreachOut } = await logRun(campaignId, "gtm-agent", () =>
-      runGtmAgent({
-        companyName,
-        signals: signalsForCompany,
-        offeringDna,
-        recommendedTitle: contact.title,
-      })
+    const { output: outreachOut } = await logRun(
+      campaignId,
+      "gtm-agent",
+      () =>
+        runGtmAgent({
+          companyName,
+          signals: signalsForCompany,
+          offeringDna,
+          recommendedTitle: contact.title,
+        }),
+      campaign.organizationId
     );
     const outreach = outreachOut as Awaited<ReturnType<typeof runGtmAgent>>;
 

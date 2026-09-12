@@ -1,3 +1,7 @@
+// Local/demo db client (SQLite). For production on Postgres, switch this
+// file's two imports to `export * from "./postgres"` -- see the switch
+// instructions at the top of src/lib/db/schema.postgres.ts for the full
+// checklist (provisioning, DATABASE_URL, migrations).
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";

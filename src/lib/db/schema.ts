@@ -27,6 +27,14 @@ const createdAt = () =>
 export const organizations = sqliteTable("organizations", {
   id: id(),
   name: text("name").notNull(),
+  // Billing/plan fields. `plan` gates campaign creation (see
+  // src/lib/billing/quota.ts); the stripe* columns are null until an org has
+  // actually gone through Checkout (src/app/api/billing/checkout/route.ts).
+  plan: text("plan").notNull().default("free"), // see src/lib/billing/plans.ts for plan ids
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  subscriptionStatus: text("subscription_status"), // active | past_due | canceled | ...
+  currentPeriodEnd: integer("current_period_end", { mode: "timestamp" }),
   createdAt: createdAt(),
 });
 
@@ -221,6 +229,27 @@ export const usage = sqliteTable("usage", {
   metric: text("metric").notNull(),
   amount: integer("amount").notNull(),
   periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
+});
+
+// Per-LLM-call usage log, written by src/lib/billing/usage-tracking.ts (via
+// the AsyncLocalStorage context in src/lib/ai/usage-context.ts) every time an
+// AI provider call returns. This is the raw data behind unit-economics
+// decisions (cost per campaign, free-tier sizing, plan pricing) -- see
+// docs/launch-checklist.md. Token counts come straight from the provider's
+// API response, so they're ground truth; `estimatedCostUsd` is only as good
+// as the rates in src/lib/billing/pricing-config.ts and is null when a
+// model isn't in that table yet.
+export const aiUsageEvents = sqliteTable("ai_usage_events", {
+  id: id(),
+  organizationId: text("organization_id").notNull(),
+  campaignId: text("campaign_id").notNull(),
+  agent: text("agent").notNull(), // e.g. "offering-agent", "gtm-agent"
+  provider: text("provider").notNull(), // "anthropic" | "openai"
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull(),
+  outputTokens: integer("output_tokens").notNull(),
+  estimatedCostUsd: real("estimated_cost_usd"),
+  createdAt: createdAt(),
 });
 
 // --- relations (for query API ergonomics) ---
