@@ -217,6 +217,41 @@ worked through top to bottom.
   from this environment. The first real campaign run with this set is the
   actual test.
 
+- **SEC EDGAR full-text search as a second, additive signal source**
+  (`src/lib/research/sec-edgar-provider.ts`, `src/lib/research/composite-provider.ts`):
+  free, no API key, searches the actual text of 10-K/10-Q/8-K filings for
+  taxonomy signal names. This is the intentional counterpart to Tavily's
+  general web/news search -- Tavily finds news chatter about a company,
+  this finds what a public company has formally *disclosed* (a capex
+  increase, a new risk factor, an 8-K material agreement). It's additive,
+  not a replacement: set `SEC_EDGAR_ENABLED="true"` alongside whatever
+  `RESEARCH_PROVIDER` you're already using and `CompositeResearchProvider`
+  merges both providers' evidence (one failing doesn't drop the other's
+  results). Rationale for building this despite an SMB-focused product:
+  the SMB *customer* is not the same as the SMB customer's *ICP* -- a
+  small vendor's own target accounts are very often large, public
+  enterprises that do file with the SEC, even though the vendor itself
+  doesn't. Requires `SEC_EDGAR_USER_AGENT` (SEC blocks requests without a
+  descriptive User-Agent identifying the requester -- this throws a clear
+  setup error if `SEC_EDGAR_ENABLED` is true and it's missing, rather than
+  failing silently with a mysterious 403 later). Like Tavily, this is
+  written against SEC EDGAR's documented API from training knowledge --
+  `efts.sec.gov` is blocked by this sandbox's network egress policy
+  (verified with a direct curl test), so it hasn't run against a live
+  response. Unlike Tavily, the pure parsing/URL-building logic (ticker
+  stripping, canonical filing URL construction, and the fallback for a hit
+  missing every plausible snippet field) was exercised against fixture
+  data standalone and confirmed correct -- see the file's own comments for
+  the one specific detail (the highlighted-snippet field name) that's an
+  educated guess rather than a confirmed fact, and degrades to an honest,
+  non-fabricated description instead of guessing at filing content if
+  wrong. The first real campaign run with this enabled is the actual test.
+  Next in this direction (not yet built): USASpending.gov/SAM.gov federal
+  contract-award data as the closest free, public equivalent signal for
+  *private* companies (which won't appear in SEC EDGAR at all), and real
+  firmographic enrichment (employeeCount/geography are still hardcoded
+  placeholders in `src/lib/agents/orchestrator.ts`'s account-seeding step).
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds

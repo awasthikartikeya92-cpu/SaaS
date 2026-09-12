@@ -230,12 +230,17 @@ remaining pieces:
 
 1. **More research signal sources.** `RESEARCH_PROVIDER=tavily` is wired up
    (`src/lib/research/tavily-provider.ts`) but unverified against Tavily's
-   live API from this environment -- see `docs/launch-checklist.md`. Worth
-   layering in alongside it: public ATS job-board APIs (Greenhouse/Lever, no
-   key needed -- strong, legally clean hiring-signal source), SEC EDGAR
-   full-text search (free, public companies only), and a firmographics
-   source to replace the neutral midpoint values `orchestrator.ts` currently
-   uses for geography/size/tech sub-scores when evidence doesn't supply them.
+   live API from this environment -- see `docs/launch-checklist.md`. SEC
+   EDGAR full-text search is now built alongside it as an additive source
+   (`SEC_EDGAR_ENABLED=true`, `src/lib/research/sec-edgar-provider.ts`) --
+   public companies only, but a small vendor's own ICP is very often large
+   public enterprises even when the vendor itself is an SMB. Still worth
+   layering in: public ATS job-board APIs (Greenhouse/Lever, no key needed
+   -- strong, legally clean hiring-signal source), USASpending.gov/SAM.gov
+   federal contract-award data (the closest free equivalent to SEC filings
+   for *private* companies), and a firmographics source to replace the
+   neutral midpoint values `orchestrator.ts` currently uses for geography/
+   size/tech sub-scores when evidence doesn't supply them.
 2. **Everything in `docs/launch-checklist.md`'s "manual step" section** --
    real pricing once usage data exists, a Stripe account, legal review, and
    real signup-abuse prevention beyond the current IP throttle.
