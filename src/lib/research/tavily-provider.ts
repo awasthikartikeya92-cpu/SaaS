@@ -26,7 +26,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // research run. Each one is a separate Tavily call, so this bounds both
 // latency (they run sequentially below) and API usage against the free
 // tier -- raise it once you've seen real usage and know you have headroom.
-const MAX_SIGNALS_PER_RUN = Number(process.env.TAVILY_MAX_SIGNALS_PER_RUN ?? 5);
+const MAX_SIGNALS_PER_RUN = Number(process.env.TAVILY_MAX_SIGNALS_PER_RUN || 5);
 
 interface TavilyResult {
   title?: string;

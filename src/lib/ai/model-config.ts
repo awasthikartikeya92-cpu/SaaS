@@ -18,9 +18,12 @@
 // ANTHROPIC_MODEL, if set, is a full blanket override -- every agent uses
 // it and the strong/fast split below is skipped entirely (for anyone who
 // wants the old single-model behavior back).
-const BLANKET_OVERRIDE = process.env.ANTHROPIC_MODEL;
-const STRONG_MODEL = BLANKET_OVERRIDE ?? process.env.ANTHROPIC_MODEL_STRONG ?? "claude-sonnet-5";
-const FAST_MODEL = BLANKET_OVERRIDE ?? process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-4-5-20251001";
+// `||` throughout, not `??`: an env var set to an empty string (easy to end
+// up with pasting a .env file into a dashboard) must fall back to the
+// default too, the same as if it were unset.
+const BLANKET_OVERRIDE = process.env.ANTHROPIC_MODEL || undefined;
+const STRONG_MODEL = BLANKET_OVERRIDE || process.env.ANTHROPIC_MODEL_STRONG || "claude-sonnet-5";
+const FAST_MODEL = BLANKET_OVERRIDE || process.env.ANTHROPIC_MODEL_FAST || "claude-haiku-4-5-20251001";
 
 // Keys must match the agent name strings used in src/lib/agents/orchestrator.ts's
 // logRun() calls -- that's also what usage/cost breakdowns are grouped by.

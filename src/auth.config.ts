@@ -10,7 +10,7 @@ export const authConfig = {
   // don't reliably auto-detect the legacy name, which surfaces as a
   // "Configuration"/MissingSecret error at sign-in time. Passing it
   // explicitly works regardless of which name is actually set.
-  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
   trustHost: true,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },

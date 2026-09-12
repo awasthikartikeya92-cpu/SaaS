@@ -7,7 +7,10 @@ let cached: AiProvider | null = null;
 export function getAiProvider(): AiProvider {
   if (cached) return cached;
 
-  const providerName = process.env.AI_PROVIDER ?? "anthropic";
+  // `||` on purpose, not `??` -- an env var set to an empty string (easy to
+  // end up with when pasting a .env file into a dashboard) should fall
+  // back to the default too, not be treated as a deliberate empty value.
+  const providerName = process.env.AI_PROVIDER || "anthropic";
 
   if (providerName === "anthropic") {
     const key = process.env.ANTHROPIC_API_KEY;

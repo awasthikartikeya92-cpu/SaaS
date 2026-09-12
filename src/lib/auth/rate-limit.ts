@@ -3,7 +3,8 @@ import { signupAttempts } from "@/lib/db/schema";
 import { and, eq, gte, sql } from "drizzle-orm";
 
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const MAX_ATTEMPTS_PER_WINDOW = Number(process.env.SIGNUP_MAX_PER_IP_PER_HOUR ?? 5);
+// `||` not `??`: Number("") is 0, not NaN -- see the same comment in plans.ts.
+const MAX_ATTEMPTS_PER_WINDOW = Number(process.env.SIGNUP_MAX_PER_IP_PER_HOUR || 5);
 
 export class SignupRateLimitedError extends Error {
   constructor() {

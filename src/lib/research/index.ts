@@ -6,7 +6,8 @@ let cached: ResearchProvider | null = null;
 
 export function getResearchProvider(): ResearchProvider {
   if (cached) return cached;
-  const providerName = process.env.RESEARCH_PROVIDER ?? "mock";
+  // `||` on purpose, not `??` -- see the same comment in src/lib/ai/index.ts.
+  const providerName = process.env.RESEARCH_PROVIDER || "mock";
 
   if (providerName === "mock") {
     cached = new MockResearchProvider();

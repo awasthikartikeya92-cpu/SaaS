@@ -10,7 +10,7 @@ export class AnthropicProvider implements AiProvider {
   // "claude-sonnet-4-6" isn't a real model id -- default to the current
   // Sonnet release. Override with ANTHROPIC_MODEL if you want a different
   // one (e.g. a cheaper/faster model for lower-stakes agents).
-  constructor(apiKey: string, model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5") {
+  constructor(apiKey: string, model = process.env.ANTHROPIC_MODEL || "claude-sonnet-5") {
     this.client = new Anthropic({ apiKey });
     this.model = model;
   }

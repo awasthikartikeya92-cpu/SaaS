@@ -20,7 +20,9 @@ export const PLANS: Record<PlanId, Plan> = {
   free: {
     id: "free",
     name: "Free",
-    campaignsPerMonth: Number(process.env.FREE_PLAN_CAMPAIGNS_PER_MONTH ?? 3),
+    // `||` not `??`: Number("") is 0, not NaN -- an env var accidentally
+    // set to an empty string must not silently become "0 free campaigns."
+    campaignsPerMonth: Number(process.env.FREE_PLAN_CAMPAIGNS_PER_MONTH || 3),
     priceUsdPerMonth: 0,
   },
   starter: {

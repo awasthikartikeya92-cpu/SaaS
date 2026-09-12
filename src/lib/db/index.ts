@@ -14,7 +14,9 @@ import * as schema from "./schema";
 // without a pooler in front. Plain DATABASE_URL is kept as a fallback for
 // any other Postgres host (Supabase, a self-hosted instance, etc.) that
 // doesn't use Vercel's naming.
-const connectionString = process.env.STORAGE_POSTGRES_URL ?? process.env.DATABASE_URL;
+// `||` not `??`: an empty-string env var must fall back too, not be
+// treated as "deliberately no connection string."
+const connectionString = process.env.STORAGE_POSTGRES_URL || process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error(
     "No Postgres connection string set -- expected STORAGE_POSTGRES_URL (Vercel Prisma Postgres) or DATABASE_URL."
