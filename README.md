@@ -1,13 +1,16 @@
-# SignalIQ — Phase 1
+# SignalIQ
 
-AI-powered account intelligence platform. This is Phase 1 per the architecture
-plan: app shell, auth, campaign creation, Offering/ICP/Signal agents, mock
-research data, dashboard, account page, and the scoring engine.
+AI-powered account intelligence platform: describe your offering, and the
+agent pipeline builds an ICP, a signal taxonomy, a scored account universe,
+and outreach recommendations from it. Originally scoped as a phased build
+(see "What's stubbed" below for what's still Phase 2+); auth, billing,
+and deploy infrastructure have since gone beyond that original Phase 1 scope
+to make the app actually launchable, not just demoable.
 
 ## Quick start
 
 Needs a real Postgres database (see "Database" below for the fastest way to
-get one), then:
+get one) and an Anthropic API key to actually run campaigns, then:
 
 ```bash
 npm install
@@ -44,19 +47,31 @@ Using a different Postgres host (Supabase, self-hosted, etc.) instead? Just
 set `DATABASE_URL` directly -- both `src/lib/db/index.ts` and
 `drizzle.config.ts` fall back to it when the `STORAGE_*` vars aren't set.
 
-**To create a NEW campaign and actually run the agent pipeline**, you need an
-Anthropic API key:
+## AI provider & model selection
 
 ```bash
 # in .env
 ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-Then "New campaign" -> fill in the offering -> the Offering, ICP, Signal,
-Contact, and GTM agents run for real (Research stays on mock data -- see
-below). Without a key, campaign creation still works but the generate step
-will log an error to that campaign's research runs and the campaign stays in
-"generating" status.
+Set a monthly spend cap in the Anthropic Console before adding a real key
+anywhere it can be triggered by outside traffic -- see `docs/launch-checklist.md`.
+
+Not every agent call runs on the same model (`src/lib/ai/model-config.ts`):
+Offering/ICP/Signal/GTM use the "strong" model (`claude-sonnet-5` by
+default) since their output is either foundational (everything downstream
+inherits it) or directly user-facing (the outreach content itself); Contact
+uses the "fast" one (`claude-haiku-4-5-20251001`) since it's picking a job
+title from known patterns and is never shown as-is to a prospect.
+`ANTHROPIC_MODEL_STRONG` / `ANTHROPIC_MODEL_FAST` override either tier;
+`ANTHROPIC_MODEL` alone still works as a full blanket override for every
+agent if you want the old single-model behavior back.
+
+Then "New campaign" -> fill in the offering -> the pipeline runs for real
+(Research stays on mock data -- see below). Without a key, or with an
+invalid one, the campaign fails cleanly: it moves to `failed` status and
+the campaign page shows which agent failed and why, instead of sitting at
+"generating" forever.
 
 ## One deviation from the original spec -- and why
 
@@ -76,13 +91,15 @@ didn't run:
   shadcn CLI output -- same Radix-primitives-plus-Tailwind pattern shadcn
   itself uses, just written directly instead of fetched.
 
-## What's real vs. stubbed in Phase 1
+## What's real vs. stubbed
 
 **Real and working:**
 - Auth (NextAuth, credentials + bcrypt), self-serve signup (`/signup`,
-  rate-limited by IP), campaign creation, full DB schema
+  rate-limited by IP -- see `docs/launch-checklist.md` on why that's a
+  deterrent, not real abuse prevention), campaign creation, full DB schema
 - Offering / ICP / Signal / Contact / GTM agents -- call Anthropic for real
-  once you add a key, with Zod-validated structured output
+  once you add a key, each on its own model tier, with Zod-validated
+  structured output
 - Verification agent -- deterministic evidence filtering (rejects anything
   without a source URL or with too little substance; never invents facts)
 - Scoring engine -- pure, testable functions, the 40/40/20 formula from the
@@ -90,22 +107,30 @@ didn't run:
 - Dashboard, campaign detail (Offering DNA / ICP / Signal Taxonomy tabs),
   full account intelligence page, global signal feed, contacts directory,
   report content generation
+- A campaign that fails partway through becomes `failed`, not stuck at
+  `generating` forever, and the campaign page shows the actual error
 
-**Intentionally stubbed (per the phase plan in the architecture doc):**
+**Intentionally stubbed:**
 - **Research provider is mock data** (`src/lib/research/mock-provider.ts`).
-  Phase 2 swaps in a real provider (Tavily/Exa/Serper) behind the same
-  `ResearchProvider` interface -- nothing above that layer changes.
-- **Contact Agent never returns a verified person** in Phase 1, by design --
-  there's no person-level enrichment source yet, so it always recommends a
-  job title instead, which is the "never invent a contact" rule from the
-  brief working as intended, not a bug.
-- **PDF/DOCX/CSV export buttons are present but disabled** (Phase 3). Report
+  A real provider goes behind the same `ResearchProvider` interface
+  (`src/lib/research/provider.ts`) -- nothing above that layer changes. See
+  `docs/launch-checklist.md` for specific provider recommendations.
+- **Contact Agent never returns a verified person**, by design -- there's
+  no person-level enrichment source yet, so it always recommends a job
+  title instead, which is the "never invent a contact" rule from the brief
+  working as intended, not a bug.
+- **PDF/DOCX/CSV export buttons are present but disabled.** Report
   *content* generation works now (`/reports`); file export doesn't yet.
-- **Scoring weights are read-only** in Settings (Phase 4 makes them
-  configurable -- the formula already reads from a config object, not
-  inline literals, so that's a settings change later, not a refactor).
+- **Scoring weights are read-only** in Settings -- the formula already
+  reads from a config object (`src/lib/scoring/index.ts`), not inline
+  literals, so making them configurable later is a settings change, not a
+  refactor.
+- **No marketing/landing page** -- `/` just redirects to `/login` or
+  `/overview`. Fine while the audience is you and people you've personally
+  sent a signup link to; not fine for public discovery.
+- **No password reset flow.**
 
-**Billing/growth infrastructure, added ahead of a real launch:**
+**Billing/growth infrastructure:**
 - **AI usage instrumentation** -- every Anthropic call is logged (exact
   token counts, per org/campaign/agent) to `ai_usage_events`, so real
   cost-per-campaign is measurable instead of guessed. See
@@ -129,7 +154,8 @@ didn't run:
 See `docs/launch-checklist.md` for exactly what's left as a manual,
 human-only step (your own Anthropic key + a spend cap in the Anthropic
 Console, filling in real pricing once usage data exists, a Stripe account,
-legal review, real signup-abuse prevention beyond the current IP throttle).
+legal review, real signup-abuse prevention beyond the current IP throttle,
+a real research provider).
 
 ## Useful commands
 
@@ -146,16 +172,27 @@ disposable local SQLite file in Phase 1, but a "drop and reseed" command is
 one wrong terminal away from wiping a real shared Postgres database once
 users exist. Reset a dev/staging database by hand when you actually mean to.
 
+`package.json` also has a `vercel-build` script Vercel uses instead of
+`build` automatically -- it force-pushes the schema and (best-effort)
+reseeds before building, because the environment this was built in
+couldn't reach Postgres directly to run those by hand. Remove it once
+you've confirmed a deploy works end to end; see `docs/launch-checklist.md`
+item 0 for why it shouldn't stay wired into every deploy long-term.
+
 ## Project layout
 
 ```
-src/lib/ai/          -- AI provider interface (Anthropic default, OpenAI stub)
-src/lib/research/    -- Research provider interface (mock now, real in Phase 2)
+src/lib/ai/          -- provider interface + per-agent model selection (Anthropic default, OpenAI stub)
+src/lib/research/    -- Research provider interface (mock now, real provider TBD)
 src/lib/agents/      -- one file per agent + orchestrator.ts
 src/lib/scoring/      -- deterministic scoring engine
-src/lib/db/            -- Drizzle schema, client, query helpers
-src/app/(dashboard)/    -- Overview, Campaigns, Accounts, Signals, Contacts, Reports, Settings
-src/app/api/              -- campaign creation, agent-pipeline trigger, report generation
+src/lib/billing/       -- plans, quota enforcement, usage tracking, Stripe, pricing config
+src/lib/auth/           -- signup rate limiting
+src/lib/analytics/       -- product analytics seam
+src/lib/db/               -- Drizzle schema, client, query helpers
+legal/                      -- Terms/Privacy source, rendered at /terms and /privacy
+src/app/(dashboard)/          -- Overview, Campaigns, Accounts, Signals, Contacts, Reports, Settings
+src/app/api/                    -- campaigns, agent-pipeline trigger, reports, auth, billing
 ```
 
 ## Verified
@@ -167,14 +204,29 @@ src/app/api/              -- campaign creation, agent-pipeline trigger, report g
 - Campaign creation API verified end-to-end (DB write confirmed), including
   the free-tier quota check (blocks with HTTP 402 at the monthly cap)
 - Postgres migration SQL generated and typechecked against `schema.ts`
-  (21 tables) -- see `docs/launch-checklist.md` for what's been run against
-  a live database vs. what's still pending your credentials
+  (22 tables)
+- Deployed to Vercel against a live Prisma Postgres database: signup,
+  login, and campaign creation confirmed working in production
 
-## Next steps (Phase 2 candidates)
+Not yet confirmed: a full agent-pipeline run completing successfully
+end-to-end in production (needs a valid `ANTHROPIC_API_KEY` in place, which
+depends on your own Anthropic account) -- see `docs/launch-checklist.md`.
 
-1. Pick a real research provider (Tavily is the simplest to wire up) and
-   implement it against `ResearchProvider` in `src/lib/research/`.
-2. Add firmographic enrichment so ICP-fit sub-scores (geography, size, tech
-   environment) aren't defaulted -- right now Phase 1 uses neutral midpoint
-   values for those where mock data doesn't supply them (see the comments in
-   `orchestrator.ts`).
+## Next steps
+
+See `docs/launch-checklist.md` for the full, current list. The two biggest
+remaining pieces:
+
+1. **A real research provider.** Tavily's free tier (built for exactly this
+   kind of AI-agent search/retrieval use case) is the fastest path off mock
+   data -- implement it against `ResearchProvider` in `src/lib/research/`.
+   Free/cheap company-signal sources worth layering in alongside it: public
+   ATS job-board APIs (Greenhouse/Lever, no key needed -- strong, legally
+   clean hiring-signal source), SEC EDGAR full-text search (free, public
+   companies only), and a firmographics source to replace the neutral
+   midpoint values `orchestrator.ts` currently uses for geography/size/tech
+   sub-scores when mock data doesn't supply them.
+2. **Everything in `docs/launch-checklist.md`'s "manual step" section** --
+   your own Anthropic key + spend cap, real pricing once usage data exists,
+   a Stripe account, legal review, and a public-facing landing page before
+   this is discoverable by anyone who isn't sent a direct signup link.
