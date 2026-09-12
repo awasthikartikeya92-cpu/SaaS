@@ -13,24 +13,59 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   const data = await getCampaignDetail(id);
   if (!data) notFound();
 
-  const { campaign, offeringDna, personas, icp, signals, accounts } = data;
+  const { campaign, offeringDna, personas, icp, signals, accounts, latestRun } = data;
+
+  // A campaign stuck at "generating" from before the orchestrator tracked
+  // failure as its own status (see src/lib/agents/orchestrator.ts) looks
+  // the same as one that's genuinely still running, unless its most recent
+  // research_runs row already recorded an error -- treat that the same as
+  // an explicit "failed" status rather than showing "refresh in a moment"
+  // forever.
+  const failedWhileGenerating = campaign.status === "generating" && latestRun?.status === "error";
 
   return (
     <div className="flex flex-col gap-6">
       <div>
         <div className="flex items-center gap-3">
           <h1 className="font-[var(--font-display)] text-2xl">{campaign.name}</h1>
-          <Badge variant={campaign.status === "active" ? "positive" : campaign.status === "generating" ? "accent" : "neutral"}>
-            {campaign.status}
+          <Badge
+            variant={
+              campaign.status === "active"
+                ? "positive"
+                : campaign.status === "failed" || failedWhileGenerating
+                  ? "negative"
+                  : campaign.status === "generating"
+                    ? "accent"
+                    : "neutral"
+            }
+          >
+            {campaign.status === "generating" && failedWhileGenerating ? "failed" : campaign.status}
           </Badge>
         </div>
         {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
       </div>
 
-      {campaign.status === "generating" && (
+      {campaign.status === "generating" && !failedWhileGenerating && (
         <Card><CardContent className="pt-5 text-sm text-ink-soft">
           Running the agent pipeline -- Offering, ICP, Signal Taxonomy, Research, Scoring. Refresh in a moment.
         </CardContent></Card>
+      )}
+
+      {(campaign.status === "failed" || failedWhileGenerating) && (
+        <Card>
+          <CardContent className="pt-5 text-sm">
+            <p className="font-medium text-negative">Generation failed{latestRun ? ` at ${latestRun.agent}` : ""}.</p>
+            {latestRun?.error && (
+              <p className="mt-2 whitespace-pre-wrap font-[var(--font-data)] text-xs text-ink-soft">
+                {latestRun.error}
+              </p>
+            )}
+            <p className="mt-3 text-xs text-ink-soft">
+              This is usually a missing or invalid <code>ANTHROPIC_API_KEY</code>. Fix the underlying issue,
+              then create a new campaign -- there&apos;s no retry for this one yet.
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {campaign.status === "draft" && (

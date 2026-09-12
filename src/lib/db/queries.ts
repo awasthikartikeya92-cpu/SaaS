@@ -12,6 +12,7 @@ import {
   signalTaxonomies,
   signalDefinitions,
   researchSources,
+  researchRuns,
 } from "./schema";
 import { eq, desc, inArray } from "drizzle-orm";
 
@@ -98,6 +99,19 @@ export async function getCampaignDetail(campaignId: string) {
     : [];
   const scoreByAccount = new Map(scores.map((s) => [s.accountId, s]));
 
+  // Most recent failed pipeline stage, if any -- lets the UI tell a stuck
+  // "generating" campaign apart from a genuinely failed one instead of
+  // saying "refresh in a moment" forever (see campaigns/[id]/page.tsx).
+  const [failedRun] =
+    campaign.status === "generating"
+      ? await db
+          .select()
+          .from(researchRuns)
+          .where(eq(researchRuns.campaignId, campaignId))
+          .orderBy(desc(researchRuns.startedAt))
+          .limit(1)
+      : [];
+
   return {
     campaign,
     offeringDna: dna,
@@ -107,6 +121,7 @@ export async function getCampaignDetail(campaignId: string) {
     accounts: campaignAccounts
       .map((a) => ({ ...a, score: scoreByAccount.get(a.id) ?? null }))
       .sort((a, b) => (b.score?.opportunity ?? 0) - (a.score?.opportunity ?? 0)),
+    latestRun: failedRun ?? null,
   };
 }
 

@@ -69,6 +69,22 @@ export async function runOrchestrator(campaignId: string) {
 
   await db.update(campaigns).set({ status: "generating" }).where(eq(campaigns.id, campaignId));
 
+  try {
+    await runPipeline(campaign, campaignId);
+    await db.update(campaigns).set({ status: "active" }).where(eq(campaigns.id, campaignId));
+  } catch (err) {
+    // Without this, a thrown error (e.g. no ANTHROPIC_API_KEY configured)
+    // leaves the campaign stuck at "generating" forever -- logRun already
+    // recorded which stage failed and why in research_runs, but the
+    // campaign itself needs its own terminal state so the UI (and anyone
+    // creating a new campaign) can tell "still running" apart from "failed
+    // partway through, will never finish on its own."
+    await db.update(campaigns).set({ status: "failed" }).where(eq(campaigns.id, campaignId));
+    throw err;
+  }
+}
+
+async function runPipeline(campaign: typeof campaigns.$inferSelect, campaignId: string) {
   // 1. Offering Agent
   const { output: dna } = await logRun(campaignId, "offering-agent", () =>
     runOfferingAgent({
@@ -292,6 +308,4 @@ export async function runOrchestrator(campaignId: string) {
       callOpener: outreach.callOpener,
     });
   }
-
-  await db.update(campaigns).set({ status: "active" }).where(eq(campaigns.id, campaignId));
 }

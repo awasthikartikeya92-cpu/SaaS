@@ -61,7 +61,7 @@ export const campaigns = pgTable("campaigns", {
   knownIcp: text("known_icp"),
   knownPersonas: text("known_personas"),
   competitors: text("competitors"),
-  status: text("status").notNull().default("draft"), // draft | generating | active | archived
+  status: text("status").notNull().default("draft"), // draft | generating | active | failed | archived
   createdAt: createdAt(),
 });
 
