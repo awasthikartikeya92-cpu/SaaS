@@ -8,7 +8,7 @@ import { authConfig } from "./auth.config";
 
 // Full config -- Node runtime only (API routes, server components). Do not
 // import this from middleware.ts; use authConfig there instead, since
-// Credentials + the better-sqlite3-backed db client aren't Edge-compatible.
+// Credentials + the postgres-backed db client aren't Edge-compatible.
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   providers: [

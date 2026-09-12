@@ -6,9 +6,14 @@ research data, dashboard, account page, and the scoring engine.
 
 ## Quick start
 
+Needs a real Postgres database (see "Database" below for the fastest way to
+get one), then:
+
 ```bash
 npm install
-cp .env.example .env   # already done for you -- dev.db + a demo login are included
+cp .env.example .env   # fill in your Postgres connection string + NEXTAUTH_SECRET
+npm run db:push          # create the schema
+npm run db:seed           # seed a demo org/user/campaign
 npm run dev
 ```
 
@@ -21,6 +26,22 @@ demo@signaliq.dev / demo1234
 The seeded campaign ("Ridgeline Ops Platform") has 6 mock accounts with full
 scores, signals, evidence, a recommended persona, and an outreach angle, so
 the whole UI is populated on first run -- no API key needed to look around.
+(Re-running `db:seed` adds another demo org rather than replacing the first
+-- it's an insert, not an upsert -- so run it once per fresh database.)
+
+## Database
+
+This runs on Postgres (Drizzle ORM). The fastest way to get one: Vercel
+project → **Storage → Add → Prisma Postgres**. That injects three env vars
+under whatever prefix you choose (default `STORAGE`):
+
+- `{PREFIX}_POSTGRES_URL` -- pooled connection, used at runtime (`src/lib/db/index.ts`)
+- `{PREFIX}_DATABASE_URL` -- direct connection, used for migrations (`drizzle.config.ts`)
+- `{PREFIX}_PRISMA_DATABASE_URL` -- Accelerate connection, **not used** (would need Prisma's own client)
+
+Using a different Postgres host (Supabase, self-hosted, etc.) instead? Just
+set `DATABASE_URL` directly -- both `src/lib/db/index.ts` and
+`drizzle.config.ts` fall back to it when the `STORAGE_*` vars aren't set.
 
 **To create a NEW campaign and actually run the agent pipeline**, you need an
 Anthropic API key:
@@ -36,25 +57,23 @@ below). Without a key, campaign creation still works but the generate step
 will log an error to that campaign's research runs and the campaign stays in
 "generating" status.
 
-## Two deviations from the original spec -- and why
+## One deviation from the original spec -- and why
 
 The brief specified **PostgreSQL + Prisma** and the **shadcn/ui CLI**. Both
-were tried first; both need to reach hosts this sandbox's network policy
-blocks (`binaries.prisma.sh` for Prisma's query-engine binary, `ui.shadcn.com`
-for the component registry). Rather than ship something that doesn't run:
+were tried first while building Phase 1 in a network-restricted sandbox that
+couldn't reach `binaries.prisma.sh` (Prisma's query-engine binary) or
+`ui.shadcn.com` (the component registry). Rather than ship something that
+didn't run:
 
-- **Drizzle ORM + SQLite** replaces Prisma + Postgres for Phase 1. Same
-  normalized schema (see `src/lib/db/schema.ts` -- it mirrors the Prisma draft
-  in the architecture doc table-for-table). Moving to Postgres in production
-  is a driver swap (`drizzle-orm/node-postgres` or `/postgres-js`), not a
-  rewrite -- the table/column shape carries over directly.
-- **Hand-built UI components** (`src/components/ui/*`) replace the shadcn CLI
-  output -- same Radix-primitives-plus-Tailwind pattern shadcn itself uses,
-  just written directly instead of fetched.
-
-If you're running this outside a network-restricted sandbox, swapping back to
-real Prisma + Postgres is a reasonable next step and the schema is already
-laid out for it in the architecture doc.
+- **Drizzle ORM + SQLite** stood in for Prisma + Postgres during Phase 1,
+  then was replaced with **Drizzle ORM + Postgres** (`src/lib/db/schema.ts`,
+  `src/lib/db/index.ts`) once a real Postgres instance was provisioned --
+  same normalized schema throughout (mirrors the Prisma draft in the
+  architecture doc table-for-table), Prisma's client/binary still isn't
+  used anywhere.
+- **Hand-built UI components** (`src/components/ui/*`) still replace the
+  shadcn CLI output -- same Radix-primitives-plus-Tailwind pattern shadcn
+  itself uses, just written directly instead of fetched.
 
 ## What's real vs. stubbed in Phase 1
 
@@ -99,29 +118,28 @@ laid out for it in the architecture doc.
 - **Product analytics seam** (`src/lib/analytics/track.ts`) -- no-ops until
   `POSTHOG_KEY` is set; call sites already exist at the events that matter
   for activation/retention tracking.
-- **Production Postgres schema** (`src/lib/db/schema.postgres.ts`) -- mirrors
-  the SQLite schema table-for-table; typechecked and migration-SQL
-  generated, not yet run against a live database. Switch instructions are
-  at the top of that file.
 - **Legal drafts** (`legal/terms.md`, `legal/privacy.md`) -- founder-drafted
   starting points, explicitly marked as needing attorney review.
 
 See `docs/launch-checklist.md` for exactly what's left as a manual,
-human-only step (provisioning Postgres, your own Anthropic key + a spend
-cap in the Anthropic Console, filling in real pricing once usage data
-exists, a Stripe account, legal review).
+human-only step (your own Anthropic key + a spend cap in the Anthropic
+Console, filling in real pricing once usage data exists, a Stripe account,
+legal review).
 
 ## Useful commands
 
 ```bash
 npm run dev          # local dev server
 npm run build         # production build (verified clean, no TS errors)
-npm run db:push        # push schema.ts changes to the SQLite DB
-npm run db:seed         # re-seed the demo campaign
-npm run db:reset          # wipe + push + seed in one step
-npm run db:generate:postgres  # generate migration SQL from schema.postgres.ts (no live DB needed)
-npm run db:push:postgres      # push schema.postgres.ts to a real Postgres DATABASE_URL
+npm run db:generate    # generate migration SQL from schema.ts (no live DB needed)
+npm run db:push         # push schema.ts to the Postgres DB in DATABASE_URL/STORAGE_DATABASE_URL
+npm run db:seed          # seed a demo org/user/campaign (insert, not upsert -- see "Quick start")
 ```
+
+There's deliberately no `db:reset`/wipe script -- that made sense against a
+disposable local SQLite file in Phase 1, but a "drop and reseed" command is
+one wrong terminal away from wiping a real shared Postgres database once
+users exist. Reset a dev/staging database by hand when you actually mean to.
 
 ## Project layout
 
@@ -139,9 +157,13 @@ src/app/api/              -- campaign creation, agent-pipeline trigger, report g
 
 - `npm run build` -- clean, no TypeScript errors, no warnings
 - Full login -> dashboard -> campaign -> account-detail flow smoke-tested
-  against the seeded data with a production server, every page returns 200
-  with real content (not an error page)
-- Campaign creation API verified end-to-end (DB write confirmed)
+  against seeded data with a production server, every page returns 200 with
+  real content (not an error page)
+- Campaign creation API verified end-to-end (DB write confirmed), including
+  the free-tier quota check (blocks with HTTP 402 at the monthly cap)
+- Postgres migration SQL generated and typechecked against `schema.ts`
+  (21 tables) -- see `docs/launch-checklist.md` for what's been run against
+  a live database vs. what's still pending your credentials
 
 ## Next steps (Phase 2 candidates)
 
@@ -151,4 +173,3 @@ src/app/api/              -- campaign creation, agent-pipeline trigger, report g
    environment) aren't defaulted -- right now Phase 1 uses neutral midpoint
    values for those where mock data doesn't supply them (see the comments in
    `orchestrator.ts`).
-3. Move to Postgres once you're off a network-restricted sandbox.

@@ -26,29 +26,19 @@ worked through top to bottom.
   `POSTHOG_KEY` is set; call sites already exist at signup-adjacent events
   (campaign created, quota blocked, generate started/succeeded/failed,
   checkout started, subscription activated/canceled).
-- **Production Postgres schema** (`src/lib/db/schema.postgres.ts`,
-  `drizzle.config.postgres.ts`, `src/lib/db/postgres.ts`): mirrors the
-  live SQLite schema table-for-table, typechecked and migration-SQL
-  generated against it, but **not yet exercised against a live database** —
-  see "Move to Postgres" below.
+- **Postgres, live** (`src/lib/db/schema.ts`, `src/lib/db/index.ts`,
+  `drizzle.config.ts`): the SQLite path from Phase 1 is gone. Runtime
+  queries use the pooled connection (`STORAGE_POSTGRES_URL`, from Vercel's
+  Prisma Postgres storage add-on); migrations use the direct one
+  (`STORAGE_DATABASE_URL`); both fall back to plain `DATABASE_URL` for any
+  other Postgres host. Migration SQL is generated and committed
+  (`drizzle/`).
 - **Legal drafts** (`legal/terms.md`, `legal/privacy.md`): founder-drafted
   starting points, explicitly marked as needing attorney review.
 
 ## What's still a manual step
 
-### 1. Move to Postgres
-1. Provision a database — the Vercel "Prisma Postgres" storage add-on
-   works well since you're already deploying there (Storage → Add). Use
-   its **direct** connection string (not the `prisma+postgres://`
-   Accelerate one) so no Prisma client/binary is required.
-2. Follow the switch instructions at the top of
-   `src/lib/db/schema.postgres.ts` (two-import change in
-   `src/lib/db/index.ts`).
-3. `npm run db:generate:postgres && npm run db:push:postgres`, then
-   `npm run db:seed`.
-4. Smoke-test: sign in, create a campaign, run generate.
-
-### 2. Your own Anthropic key, in production
+### 1. Your own Anthropic key, in production
 - Set `ANTHROPIC_API_KEY` as a Vercel environment variable (never commit
   it). Every user — free and paid — runs through this one key.
 - **Set a monthly spend cap in the Anthropic Console.** This is the
@@ -57,7 +47,7 @@ worked through top to bottom.
 - Optionally set `ANTHROPIC_MODEL` if you want something other than the
   current default in `anthropic-provider.ts`.
 
-### 3. Turn token counts into real pricing
+### 2. Turn token counts into real pricing
 - Run a handful of real campaigns once #2 is done.
 - Query `getCampaignUsage(campaignId)` / `getOrganizationUsageThisPeriod(orgId)`
   (`src/lib/billing/usage-tracking.ts`) to see real input/output tokens per
@@ -70,7 +60,7 @@ worked through top to bottom.
   the current default of 3 turns out too generous or too stingy relative
   to when users actually see value.
 
-### 4. Turn on billing
+### 3. Turn on billing
 - Create a Stripe account, get `STRIPE_SECRET_KEY` and
   `STRIPE_WEBHOOK_SECRET`, point a webhook endpoint at
   `/api/billing/webhook` for `checkout.session.completed`,
@@ -80,12 +70,12 @@ worked through top to bottom.
 - Decide the free-cohort transition (grandfather vs. notice-then-convert)
   before flipping this on for existing users — see Terms §3.
 
-### 5. Legal
+### 4. Legal
 - Have `legal/terms.md` and `legal/privacy.md` reviewed by an attorney,
   fill in the `[ ]` placeholders, and link them from the app (signup
   screen, footer) before real users sign up.
 
-### 6. Optional, not yet scaffolded
+### 5. Optional, not yet scaffolded
 - Error monitoring (e.g. Sentry) — not wired up in this pass; worth adding
   before real users hit production.
 - Real research provider (Tavily/Exa/Serper) — still mock data per the
