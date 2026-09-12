@@ -9,7 +9,12 @@ import { reportAiUsage } from "./usage-context";
 // runOrchestrator's catch block to ever run, leaving the campaign stuck at
 // "generating" instead of cleanly "failed". Fail this one call fast enough
 // that there's still time left in the budget to record it and finish.
-const REQUEST_TIMEOUT_MS = 25_000;
+//
+// 25s (with maxRetries: 1 below) turned out too aggressive in production: a
+// real offering-agent call (long system prompt, up to 8192 output tokens)
+// legitimately took longer than 25s to finish, which is not a broken call --
+// it's just a big generation. 40s gives real completions realistic room.
+const REQUEST_TIMEOUT_MS = 40_000;
 
 export class AnthropicProvider implements AiProvider {
   name = "anthropic";
@@ -33,7 +38,21 @@ export class AnthropicProvider implements AiProvider {
         system,
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
       },
-      { timeout: REQUEST_TIMEOUT_MS, maxRetries: 1 }
+      // maxRetries: 0 -- verified against the SDK's own retry logic
+      // (node_modules/@anthropic-ai/sdk/client.js): a connection *timeout*
+      // is retried unconditionally, independent of the normal 4xx/5xx retry
+      // rules, and that retry gets the *same* REQUEST_TIMEOUT_MS budget
+      // again. With maxRetries: 1 that silently turned one slow-but-fine
+      // response into two full timeout windows back to back (~80s wall
+      // clock at the old 40s value) before finally throwing -- this is
+      // exactly what produced a raw "Request timed out." failure on a real
+      // campaign despite a valid, working API key. Since every agent call
+      // already happens inside its own try/catch (logRun) and a single
+      // account's failure doesn't sink the campaign (see orchestrator.ts),
+      // there's no reliability benefit here worth doubling our exposure to
+      // the 60s function budget for -- fail once, fail fast, let the
+      // existing failure handling take it from there.
+      { timeout: REQUEST_TIMEOUT_MS, maxRetries: 0 }
     );
 
     // Ground-truth token counts from the API response itself -- this is the

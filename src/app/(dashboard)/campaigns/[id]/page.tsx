@@ -24,6 +24,17 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
   // forever.
   const failedWhileGenerating = campaign.status === "generating" && latestRun?.status === "error";
 
+  // The failure card's hint used to always say "usually a missing/invalid
+  // ANTHROPIC_API_KEY" no matter what actually failed -- misleading for a
+  // real error like a request timeout, which looked identical to a
+  // misconfigured key from the UI alone. Match on the actual error text
+  // instead so the hint points at what's actually likely wrong.
+  const failureHint = /timed? ?out/i.test(latestRun?.error ?? "")
+    ? "The AI provider took too long to respond. This can happen on a large or detailed offering description -- create a new campaign and try again; if it keeps happening, it may be worth trimming the offering details."
+    : /api[_ ]?key|unauthorized|401|authentication/i.test(latestRun?.error ?? "")
+      ? "This is usually a missing or invalid ANTHROPIC_API_KEY."
+      : "Check the error above for what went wrong.";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
@@ -65,8 +76,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               </p>
             )}
             <p className="mt-3 text-xs text-ink-soft">
-              This is usually a missing or invalid <code>ANTHROPIC_API_KEY</code>. Fix the underlying issue,
-              then create a new campaign -- there&apos;s no retry for this one yet.
+              {failureHint} Create a new campaign to try again -- there&apos;s no retry for this one yet.
             </p>
           </CardContent>
         </Card>

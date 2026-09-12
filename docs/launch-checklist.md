@@ -53,6 +53,36 @@ worked through top to bottom.
     request/response cycle entirely (a background job/queue), not another
     round of tuning constants -- worth raising `maxDuration` if you're on
     Pro (up to 300s, more with Fluid compute) as a stopgap first.
+  - **Update, confirmed in production, not just theoretical**: a real
+    campaign failed at offering-agent with a raw `Request timed out.` --
+    diagnosed by reading the Anthropic SDK's own retry logic
+    (`node_modules/@anthropic-ai/sdk/client.js`): a connection *timeout* is
+    retried unconditionally regardless of `maxRetries`'s normal 4xx/5xx
+    rules, and the retry gets the *same* timeout budget again. With the
+    `maxRetries: 1` this pipeline had set, one slow-but-otherwise-fine
+    25s+ response silently became two full 25s attempts back to back
+    (~50s+ wall clock) before finally throwing -- indistinguishable from a
+    broken key from the UI, but not actually one. Fixed in
+    `src/lib/ai/anthropic-provider.ts`: `maxRetries: 0` (every agent call
+    already runs inside its own try/catch via `logRun`, and one account's
+    failure doesn't sink the campaign, so a timeout retry here buys nothing
+    worth doubling the exposure for) and the base timeout raised
+    25s -> 40s, since 25s proved too tight for a real, valid, large
+    completion. Also fixed the failure card's hint text
+    (`src/app/(dashboard)/campaigns/[id]/page.tsx`), which used to always
+    say "usually a missing/invalid ANTHROPIC_API_KEY" regardless of the
+    actual error -- it now matches the real error text instead.
+  - This also makes the sequential-calls risk above concrete rather than
+    hypothetical: offering-agent -> icp-agent -> signal-agent run one after
+    another before any account work starts, so even without any retry,
+    3 real (not mock) calls at a 40s cap is 120s worst case -- already past
+    Hobby's 60s ceiling on its own, before Research/Contact/GTM run at all.
+    If timeouts recur after this fix, the two real options are: raise
+    `maxDuration` in `src/app/api/campaigns/[id]/generate/route.ts` past 60
+    (requires Vercel Pro or higher -- Hobby hard-clamps to 60 regardless of
+    what's set), or do the background-job decoupling mentioned above. Tune
+    constants only gets you so far against a fundamentally synchronous,
+    single-HTTP-request pipeline.
 - **AI usage instrumentation** (`src/lib/ai/usage-context.ts`,
   `src/lib/billing/usage-tracking.ts`, `ai_usage_events` table): every
   Anthropic call made through the orchestrator now logs exact input/output
