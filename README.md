@@ -94,6 +94,10 @@ didn't run:
 ## What's real vs. stubbed
 
 **Real and working:**
+- A real marketing landing page at `/` -- positioning, product preview built
+  from the app's own real UI components, no fabricated social proof or
+  pricing numbers. `/` now serves this to signed-out visitors instead of
+  redirecting straight to `/login`.
 - Auth (NextAuth, credentials + bcrypt), self-serve signup (`/signup`,
   rate-limited by IP -- see `docs/launch-checklist.md` on why that's a
   deterrent, not real abuse prevention), campaign creation, full DB schema
@@ -125,9 +129,6 @@ didn't run:
   reads from a config object (`src/lib/scoring/index.ts`), not inline
   literals, so making them configurable later is a settings change, not a
   refactor.
-- **No marketing/landing page** -- `/` just redirects to `/login` or
-  `/overview`. Fine while the audience is you and people you've personally
-  sent a signup link to; not fine for public discovery.
 - **No password reset flow.**
 
 **Billing/growth infrastructure:**
@@ -217,16 +218,14 @@ depends on your own Anthropic account) -- see `docs/launch-checklist.md`.
 See `docs/launch-checklist.md` for the full, current list. The two biggest
 remaining pieces:
 
-1. **A real research provider.** Tavily's free tier (built for exactly this
-   kind of AI-agent search/retrieval use case) is the fastest path off mock
-   data -- implement it against `ResearchProvider` in `src/lib/research/`.
-   Free/cheap company-signal sources worth layering in alongside it: public
-   ATS job-board APIs (Greenhouse/Lever, no key needed -- strong, legally
-   clean hiring-signal source), SEC EDGAR full-text search (free, public
-   companies only), and a firmographics source to replace the neutral
-   midpoint values `orchestrator.ts` currently uses for geography/size/tech
-   sub-scores when mock data doesn't supply them.
+1. **More research signal sources.** `RESEARCH_PROVIDER=tavily` is wired up
+   (`src/lib/research/tavily-provider.ts`) but unverified against Tavily's
+   live API from this environment -- see `docs/launch-checklist.md`. Worth
+   layering in alongside it: public ATS job-board APIs (Greenhouse/Lever, no
+   key needed -- strong, legally clean hiring-signal source), SEC EDGAR
+   full-text search (free, public companies only), and a firmographics
+   source to replace the neutral midpoint values `orchestrator.ts` currently
+   uses for geography/size/tech sub-scores when evidence doesn't supply them.
 2. **Everything in `docs/launch-checklist.md`'s "manual step" section** --
-   your own Anthropic key + spend cap, real pricing once usage data exists,
-   a Stripe account, legal review, and a public-facing landing page before
-   this is discoverable by anyone who isn't sent a direct signup link.
+   real pricing once usage data exists, a Stripe account, legal review, and
+   real signup-abuse prevention beyond the current IP throttle.

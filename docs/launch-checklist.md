@@ -63,6 +63,18 @@ worked through top to bottom.
   token/cost usage per agent (from the instrumentation above), and an
   Upgrade button per paid plan -- hidden until that plan actually has a
   price set in `src/lib/billing/plans.ts`.
+- **Real marketing landing page** (`src/app/page.tsx`): `/` now serves an
+  actual pitch to signed-out visitors instead of redirecting straight to
+  `/login` -- positioning built around the SMB/mid-market-vs-enterprise-
+  intent-data-platforms GTM, product preview built from the app's own real
+  UI components (no stock photography, no fabricated logos/testimonials/
+  pricing numbers).
+- **Tavily research provider** (`src/lib/research/tavily-provider.ts`):
+  `RESEARCH_PROVIDER=tavily` replaces mock data with real web/news search.
+  Written against Tavily's documented API from training knowledge, not
+  verified live -- both `docs.tavily.com` and `api.tavily.com` are blocked
+  from this environment. The first real campaign run with this set is the
+  actual test.
 
 ## What's still a manual step
 
