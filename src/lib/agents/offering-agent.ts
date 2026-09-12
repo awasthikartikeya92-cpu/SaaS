@@ -1,4 +1,5 @@
 import { getAiProvider } from "@/lib/ai";
+import { getModelForAgent } from "@/lib/ai/model-config";
 import { OfferingDnaSchema, parseJson, type OfferingDna } from "./schemas";
 
 export interface OfferingAgentInput {
@@ -38,6 +39,7 @@ export async function runOfferingAgent(input: OfferingAgentInput): Promise<Offer
         content: JSON.stringify(input, null, 2),
       },
     ],
+    model: getModelForAgent("offering-agent"),
   });
   return parseJson(raw, OfferingDnaSchema);
 }

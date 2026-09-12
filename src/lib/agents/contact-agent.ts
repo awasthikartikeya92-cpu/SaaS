@@ -1,4 +1,5 @@
 import { getAiProvider } from "@/lib/ai";
+import { getModelForAgent } from "@/lib/ai/model-config";
 import { ContactRecommendationSchema, parseJson, type ContactRecommendation, type OfferingDna, type IcpProfile } from "./schemas";
 
 // Phase 1 runs on mock research data with no person-level enrichment, so this
@@ -31,6 +32,7 @@ export async function runContactAgent(input: ContactAgentInput): Promise<Contact
   const raw = await provider.complete({
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
+    model: getModelForAgent("contact-agent"),
   });
   const parsed = parseJson(raw, ContactRecommendationSchema);
   return { ...parsed, name: null, isVerified: false }; // enforced floor, not just prompted

@@ -13,6 +13,15 @@ worked through top to bottom.
   token counts per organization/campaign/agent. `getCampaignUsage()` and
   `getOrganizationUsageThisPeriod()` (in `usage-tracking.ts`) give you the
   real per-campaign and per-org cost breakdown once real campaigns run.
+- **Per-agent model selection** (`src/lib/ai/model-config.ts`): Offering/
+  ICP/Signal/GTM run on the "strong" model (`claude-sonnet-5` by default),
+  Contact -- which just picks a job title, once per account, never
+  user-facing -- runs on the "fast" one (`claude-haiku-4-5-20251001`).
+  `ANTHROPIC_MODEL_STRONG`/`ANTHROPIC_MODEL_FAST` override either tier;
+  `ANTHROPIC_MODEL` alone still works as a full blanket override for
+  everything if you'd rather go back to one model. Once #2 below has real
+  per-agent cost numbers, revisit whether this split is actually saving
+  meaningful money or whether Contact's quality took a real hit for it.
 - **Free-tier quota enforcement** (`src/lib/billing/plans.ts`,
   `src/lib/billing/quota.ts`): campaign creation is capped at
   `FREE_PLAN_CAMPAIGNS_PER_MONTH` (default 3) per organization per calendar

@@ -14,6 +14,13 @@ export interface AiCompleteOptions {
   maxTokens?: number;
   /** When set, the provider is asked to return JSON matching this shape description. */
   jsonMode?: boolean;
+  /**
+   * Per-call model override. Falls back to the provider's own default when
+   * unset. Agents should normally pass this via getModelForAgent()
+   * (src/lib/ai/model-config.ts) rather than hardcoding a model string, so
+   * "which agent uses which model" stays in one place.
+   */
+  model?: string;
 }
 
 export interface AiProvider {

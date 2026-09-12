@@ -1,4 +1,5 @@
 import { getAiProvider } from "@/lib/ai";
+import { getModelForAgent } from "@/lib/ai/model-config";
 import { SignalTaxonomySchema, parseJson, type SignalTaxonomy, type OfferingDna, type IcpProfile } from "./schemas";
 
 const SYSTEM = `You are the Signal Agent inside SignalIQ. Derive a dynamic taxonomy of PUBLIC
@@ -15,6 +16,7 @@ export async function runSignalAgent(offeringDna: OfferingDna, icp: IcpProfile):
   const raw = await provider.complete({
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify({ offeringDna, icp }, null, 2) }],
+    model: getModelForAgent("signal-agent"),
   });
   return parseJson(raw, SignalTaxonomySchema);
 }

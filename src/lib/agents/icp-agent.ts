@@ -1,4 +1,5 @@
 import { getAiProvider } from "@/lib/ai";
+import { getModelForAgent } from "@/lib/ai/model-config";
 import { IcpProfileSchema, parseJson, type IcpProfile, type OfferingDna } from "./schemas";
 
 export interface IcpAgentInput {
@@ -32,6 +33,7 @@ export async function runIcpAgent(input: IcpAgentInput): Promise<IcpProfile> {
   const raw = await provider.complete({
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
+    model: getModelForAgent("icp-agent"),
   });
   return parseJson(raw, IcpProfileSchema);
 }

@@ -1,4 +1,5 @@
 import { getAiProvider } from "@/lib/ai";
+import { getModelForAgent } from "@/lib/ai/model-config";
 import { OutreachRecommendationSchema, parseJson, type OutreachRecommendation, type OfferingDna } from "./schemas";
 import type { VerifiedSignal } from "./verification-agent";
 
@@ -26,6 +27,7 @@ export async function runGtmAgent(input: GtmAgentInput): Promise<OutreachRecomme
   const raw = await provider.complete({
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
+    model: getModelForAgent("gtm-agent"),
   });
   return parseJson(raw, OutreachRecommendationSchema);
 }

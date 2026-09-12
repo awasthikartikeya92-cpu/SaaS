@@ -15,9 +15,10 @@ export class AnthropicProvider implements AiProvider {
     this.model = model;
   }
 
-  async complete({ system, messages, maxTokens = 4096 }: AiCompleteOptions): Promise<string> {
+  async complete({ system, messages, maxTokens = 4096, model }: AiCompleteOptions): Promise<string> {
+    const resolvedModel = model ?? this.model;
     const response = await this.client.messages.create({
-      model: this.model,
+      model: resolvedModel,
       max_tokens: maxTokens,
       system,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -25,10 +26,12 @@ export class AnthropicProvider implements AiProvider {
 
     // Ground-truth token counts from the API response itself -- this is the
     // one thing that's never a guess. See src/lib/billing/pricing-config.ts
-    // for how (or whether) this turns into a dollar figure.
+    // for how (or whether) this turns into a dollar figure. Reported
+    // against resolvedModel (not this.model) so usage/cost breakdowns are
+    // accurate when an agent overrode the model per-call.
     reportAiUsage({
       provider: this.name,
-      model: this.model,
+      model: resolvedModel,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
     });
