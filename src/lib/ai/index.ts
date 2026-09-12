@@ -10,7 +10,11 @@ export function getAiProvider(): AiProvider {
   // `||` on purpose, not `??` -- an env var set to an empty string (easy to
   // end up with when pasting a .env file into a dashboard) should fall
   // back to the default too, not be treated as a deliberate empty value.
-  const providerName = process.env.AI_PROVIDER || "anthropic";
+  // .toLowerCase().trim() because a dashboard env var is free-typed text,
+  // not a validated enum -- "Anthropic" (someone reasonably capitalizing
+  // a proper noun while re-checking a value) failed this exact-match
+  // check in production and looked identical to a real misconfiguration.
+  const providerName = (process.env.AI_PROVIDER || "anthropic").toLowerCase().trim();
 
   if (providerName === "anthropic") {
     const key = process.env.ANTHROPIC_API_KEY;
