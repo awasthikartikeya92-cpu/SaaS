@@ -17,7 +17,8 @@ npm run db:seed           # seed a demo org/user/campaign
 npm run dev
 ```
 
-Open http://localhost:3000 and sign in with the seeded demo account:
+Open http://localhost:3000 -- sign in with the seeded demo account, or use
+**Sign up** to create a real account of your own (`/signup`):
 
 ```
 demo@signaliq.dev / demo1234
@@ -78,7 +79,8 @@ didn't run:
 ## What's real vs. stubbed in Phase 1
 
 **Real and working:**
-- Auth (NextAuth, credentials + bcrypt), campaign creation, full DB schema
+- Auth (NextAuth, credentials + bcrypt), self-serve signup (`/signup`,
+  rate-limited by IP), campaign creation, full DB schema
 - Offering / ICP / Signal / Contact / GTM agents -- call Anthropic for real
   once you add a key, with Zod-validated structured output
 - Verification agent -- deterministic evidence filtering (rejects anything
@@ -118,13 +120,16 @@ didn't run:
 - **Product analytics seam** (`src/lib/analytics/track.ts`) -- no-ops until
   `POSTHOG_KEY` is set; call sites already exist at the events that matter
   for activation/retention tracking.
+- **Plan & usage in Settings** -- current plan, this month's real AI
+  token/cost usage per agent, and an Upgrade button per priced plan.
 - **Legal drafts** (`legal/terms.md`, `legal/privacy.md`) -- founder-drafted
-  starting points, explicitly marked as needing attorney review.
+  starting points, explicitly marked as needing attorney review, live at
+  `/terms` and `/privacy` and linked from `/signup`.
 
 See `docs/launch-checklist.md` for exactly what's left as a manual,
 human-only step (your own Anthropic key + a spend cap in the Anthropic
 Console, filling in real pricing once usage data exists, a Stripe account,
-legal review).
+legal review, real signup-abuse prevention beyond the current IP throttle).
 
 ## Useful commands
 

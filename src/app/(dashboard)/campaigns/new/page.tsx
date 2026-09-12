@@ -43,7 +43,10 @@ export default function NewCampaignPage() {
           targetGeographies: form.targetGeographies.split(",").map((s) => s.trim()).filter(Boolean),
         }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(typeof body?.error === "string" ? body.error : "Something went wrong.");
+      }
       const { id } = await res.json();
       // Fire-and-forget: kick off the agent pipeline, then go to the campaign page.
       fetch(`/api/campaigns/${id}/generate`, { method: "POST" });

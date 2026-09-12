@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("demo@signaliq.dev");
-  const [password, setPassword] = useState("demo1234");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -50,7 +51,10 @@ export default function LoginPage() {
               {loading ? "Signing in..." : "Sign in"}
             </Button>
             <p className="text-xs text-ink-soft">
-              Seeded demo account: demo@signaliq.dev / demo1234
+              New here?{" "}
+              <Link href="/signup" className="underline">
+                Create a workspace
+              </Link>
             </p>
           </form>
         </CardContent>

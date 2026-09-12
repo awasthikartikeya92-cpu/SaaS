@@ -34,7 +34,26 @@ worked through top to bottom.
   other Postgres host. Migration SQL is generated and committed
   (`drizzle/`).
 - **Legal drafts** (`legal/terms.md`, `legal/privacy.md`): founder-drafted
-  starting points, explicitly marked as needing attorney review.
+  starting points, explicitly marked as needing attorney review -- now
+  actually reachable at `/terms` and `/privacy` (rendered from the same
+  files, so editing the `.md` is the only thing needed once they're
+  reviewed) and linked from the signup page.
+- **Signup flow** (`/signup`, `POST /api/auth/register`): creates an
+  organization + user, hashes the password, and signs them in. Rate-limited
+  by IP (`src/lib/auth/rate-limit.ts`, `signup_attempts` table, 5/hour by
+  default via `SIGNUP_MAX_PER_IP_PER_HOUR`) -- a deterrent against
+  mass-creating free orgs to bypass the per-org campaign quota, not a real
+  defense (an attacker rotating IPs still gets through). Real abuse
+  prevention (email verification, CAPTCHA) is still open -- see below.
+  The login page no longer pre-fills the demo password now that real
+  signups exist.
+- **Quota error messages fixed**: `campaigns/new` and the checkout button
+  now show the actual error text instead of a raw JSON blob when a request
+  fails (402 quota, checkout errors, etc.).
+- **Plan & usage visible in Settings**: current plan, this month's AI
+  token/cost usage per agent (from the instrumentation above), and an
+  Upgrade button per paid plan -- hidden until that plan actually has a
+  price set in `src/lib/billing/plans.ts`.
 
 ## What's still a manual step
 
@@ -56,15 +75,6 @@ page loads):
   outright, but it'll leave an orphaned duplicate "Ridgeline Ops (demo)"
   organization row (no login) if it ever runs twice before you remove it —
   worth a quick manual cleanup if that happens.
-
-### 0.5. There's no signup flow yet
-Found while wiring this up: the only way to get a user into the database
-right now is `scripts/seed.ts` — there's no `/register` route or page. That
-was invisible in Phase 1 because everything ran against the seeded demo
-account. This has to exist before a real stranger can use the product; it's
-a real feature to build (an API route + page, reusing the existing
-`bcryptjs` hashing and `organizations`/`users` tables), not a config
-change like everything else on this list.
 
 ### 1. Your own Anthropic key, in production
 - Set `ANTHROPIC_API_KEY` as a Vercel environment variable (never commit
@@ -99,13 +109,27 @@ change like everything else on this list.
   before flipping this on for existing users — see Terms §3.
 
 ### 4. Legal
-- Have `legal/terms.md` and `legal/privacy.md` reviewed by an attorney,
-  fill in the `[ ]` placeholders, and link them from the app (signup
-  screen, footer) before real users sign up.
+- Have `legal/terms.md` and `legal/privacy.md` reviewed by an attorney and
+  fill in the `[ ]` placeholders -- they're already linked from `/signup`
+  and live at `/terms`/`/privacy`, so no code change is needed once the
+  content is final, just edit the `.md` files.
 
-### 5. Optional, not yet scaffolded
+### 5. Real abuse prevention on signup
+The IP-based rate limit (`src/lib/auth/rate-limit.ts`) is a speed bump, not
+a real defense -- it stops a script hitting `/api/auth/register` in a tight
+loop, not someone deliberately rotating IPs to keep creating free orgs and
+bypassing the campaign quota. If free-tier abuse shows up in the usage
+data from #2, the real fix is one of: require email verification before a
+new org can generate a campaign (needs an email-sending provider -- Resend
+is the simplest to wire up), or add a CAPTCHA (e.g. Cloudflare Turnstile)
+to the signup form.
+
+### 6. Optional, not yet scaffolded
 - Error monitoring (e.g. Sentry) — not wired up in this pass; worth adding
   before real users hit production.
 - Real research provider (Tavily/Exa/Serper) — still mock data per the
   Phase 1 README; this is the other cost center once it's live, and should
   get the same usage-instrumentation treatment as the Anthropic calls.
+- Password reset / "forgot password" -- there's no self-serve flow yet;
+  handle it manually (reset via `db:seed`-style script, or a direct DB
+  update) until this exists.

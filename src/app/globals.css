@@ -79,3 +79,22 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Rendered markdown on /terms and /privacy (src/app/terms, src/app/privacy) --
+   the source .md files are our own committed content, never user input. */
+.legal-content h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.75rem; }
+.legal-content h2 { font-size: 1.15rem; font-weight: 600; margin: 1.75rem 0 0.5rem; }
+.legal-content p { margin: 0.75rem 0; line-height: 1.6; }
+.legal-content ul { margin: 0.75rem 0; padding-left: 1.25rem; list-style: disc; }
+.legal-content li { margin: 0.25rem 0; line-height: 1.5; }
+.legal-content strong { font-weight: 600; }
+.legal-content a { text-decoration: underline; }
+.legal-content blockquote {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--line-strong);
+  background: var(--paper-raised);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+.legal-content hr { border: none; border-top: 1px solid var(--line); margin: 1.5rem 0; }

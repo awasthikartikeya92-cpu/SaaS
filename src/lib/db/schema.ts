@@ -231,6 +231,18 @@ export const usage = pgTable("usage", {
 // API response, so they're ground truth; `estimatedCostUsd` is only as good
 // as the rates in src/lib/billing/pricing-config.ts and is null when a
 // model isn't in that table yet.
+// Crude, IP-based signup throttle (src/lib/auth/rate-limit.ts). This is a
+// deterrent, not a real defense -- an attacker who rotates IPs still gets
+// through -- but it raises the bar above "one HTTP request per free org"
+// against the per-organization campaign quota, without requiring an email
+// provider or CAPTCHA service. Real abuse prevention (email verification,
+// CAPTCHA) is a documented follow-up in docs/launch-checklist.md.
+export const signupAttempts = pgTable("signup_attempts", {
+  id: id(),
+  ipAddress: text("ip_address").notNull(),
+  createdAt: createdAt(),
+});
+
 export const aiUsageEvents = pgTable("ai_usage_events", {
   id: id(),
   organizationId: text("organization_id").notNull(),
