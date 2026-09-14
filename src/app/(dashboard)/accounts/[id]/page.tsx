@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScoreBar, OpportunityScore } from "@/components/dashboard/score-bar";
 import { TierBadge, ConfidenceBadge } from "@/components/dashboard/tier-badge";
+import { OutreachChannels } from "@/components/dashboard/outreach-channels";
 import { formatDate } from "@/lib/utils";
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -95,48 +96,47 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle>Recommended persona / decision makers</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {contacts.length === 0 && <p className="text-sm text-ink-soft">No contact recommendation yet.</p>}
-            {contacts.map((c) => (
-              <div key={c.id}>
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium">{c.name ?? c.title}</p>
-                  {c.isVerified ? <Badge variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
-                </div>
-                {c.name && <p className="text-xs text-ink-soft">{c.title}</p>}
-                <p className="mt-1 text-sm text-ink-soft">{c.relevance}</p>
+      <Card>
+        <CardHeader><CardTitle>Recommended persona / decision makers</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {contacts.length === 0 && <p className="text-sm text-ink-soft">No contact recommendation yet.</p>}
+          {contacts.map((c) => (
+            <div key={c.id}>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium">{c.name ?? c.title}</p>
+                {c.isVerified ? <Badge variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
               </div>
-            ))}
-          </CardContent>
-        </Card>
+              {c.name && <p className="text-xs text-ink-soft">{c.title}</p>}
+              <p className="mt-1 text-sm text-ink-soft">{c.relevance}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader><CardTitle>Recommended outreach angle</CardTitle></CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {!outreach ? (
-              <p className="text-sm text-ink-soft">Not generated yet.</p>
-            ) : (
-              <>
+      <Card>
+        <CardHeader><CardTitle>Recommended outreach</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {!outreach ? (
+            <p className="text-sm text-ink-soft">Not generated yet.</p>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2">
                 <p className="text-sm text-ink">{outreach.angle}</p>
                 <ul className="flex flex-col gap-1">
                   {outreach.talkingPoints.map((t, i) => (
                     <li key={i} className="text-sm text-ink-soft">- {t}</li>
                   ))}
                 </ul>
-                {outreach.draftEmail && (
-                  <details className="text-sm">
-                    <summary className="cursor-pointer text-accent">Draft email (AI-generated -- review before sending)</summary>
-                    <p className="mt-2 whitespace-pre-wrap text-ink-soft">{outreach.draftEmail}</p>
-                  </details>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              </div>
+              <OutreachChannels
+                draftEmail={outreach.draftEmail}
+                draftLinkedIn={outreach.draftLinkedIn}
+                callOpener={outreach.callOpener}
+              />
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

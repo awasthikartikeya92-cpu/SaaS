@@ -91,15 +91,48 @@ async function main() {
 
   const [taxonomy] = await db.insert(signalTaxonomies).values({ campaignId: campaign.id }).returning();
   const signalDefs = [
-    { name: "Dispatch/ops-tooling job posting", tier: 1 as const, description: "Company posts a role naming dispatch, fleet, or ops-visibility tooling directly." },
-    { name: "SLA or fulfillment complaint mention", tier: 1 as const, description: "Public mention of missed SLAs, delivery delays, or fulfillment issues." },
-    { name: "Operations leadership change", tier: 2 as const, description: "New VP/Director of Operations or Logistics hired or promoted." },
-    { name: "Warehouse or fleet expansion", tier: 2 as const, description: "Announced new warehouse, distribution center, or fleet expansion." },
-    { name: "Regional business press mention", tier: 3 as const, description: "Mentioned in regional business press discussing operational growth or budget." },
-    { name: "Case study referencing incomplete tooling", tier: 3 as const, description: "Published case study or blog referencing a partial/legacy solution in this category." },
+    {
+      name: "Dispatch/ops-tooling job posting",
+      tier: 1 as const,
+      description: "Company posts a role naming dispatch, fleet, or ops-visibility tooling directly.",
+      phrase: "posted a role calling out dispatch/fleet-visibility tooling by name",
+    },
+    {
+      name: "SLA or fulfillment complaint mention",
+      tier: 1 as const,
+      description: "Public mention of missed SLAs, delivery delays, or fulfillment issues.",
+      phrase: "had a public mention of missed SLAs or fulfillment delays",
+    },
+    {
+      name: "Operations leadership change",
+      tier: 2 as const,
+      description: "New VP/Director of Operations or Logistics hired or promoted.",
+      phrase: "just brought in new operations leadership",
+    },
+    {
+      name: "Warehouse or fleet expansion",
+      tier: 2 as const,
+      description: "Announced new warehouse, distribution center, or fleet expansion.",
+      phrase: "announced a new warehouse or fleet expansion",
+    },
+    {
+      name: "Regional business press mention",
+      tier: 3 as const,
+      description: "Mentioned in regional business press discussing operational growth or budget.",
+      phrase: "was mentioned in regional press discussing operational growth",
+    },
+    {
+      name: "Case study referencing incomplete tooling",
+      tier: 3 as const,
+      description: "Published case study or blog referencing a partial/legacy solution in this category.",
+      phrase: "published a case study referencing a partial ops-tooling setup",
+    },
   ];
   for (const s of signalDefs) {
-    await db.insert(signalDefinitions).values({ taxonomyId: taxonomy.id, ...s });
+    // Explicit fields, not `...s` -- signalDefs now also carries `phrase`
+    // (used below for the outreach drafts, not a real column on this
+    // table), and signalDefinitions has no such column.
+    await db.insert(signalDefinitions).values({ taxonomyId: taxonomy.id, name: s.name, tier: s.tier, description: s.description });
   }
 
   const [researchRun] = await db
@@ -180,9 +213,9 @@ async function main() {
         "Anchor on time-to-value (two-week deployment)",
         "Address the ERP-integration objection early",
       ],
-      draftEmail: null,
-      draftLinkedIn: null,
-      callOpener: null,
+      draftEmail: `Hi there,\n\nI noticed ${m.name} ${def.phrase} -- usually the first visible sign of dispatch, inventory, and field service running on disconnected tools, which is exactly where SLA misses start creeping in.\n\nRidgeline Ops consolidates that into one operations layer and deploys in under two weeks without touching your existing ERP. Worth 15 minutes to see if it's relevant to what you're dealing with?\n\nBest,\n[Your name]`,
+      draftLinkedIn: `Hi -- saw that ${m.name} ${def.phrase}. We work with mid-market logistics/manufacturing teams on exactly this (SLA reliability, no ERP rip-and-replace, two-week deploy). Open to a quick chat?`,
+      callOpener: `Hi, this is [Your name] from Ridgeline Ops. I'll keep this short -- I saw that ${m.name} ${def.phrase}, and that's usually the first sign of an ops-visibility gap. Do you have thirty seconds for me to explain why I'm calling?`,
     });
   }
 

@@ -7,6 +7,43 @@ worked through top to bottom.
 
 ## Already built in this pass
 
+- **All three outreach drafts rendered, channel-appropriate, with a real
+  copy affordance** (`src/components/dashboard/outreach-channels.tsx`, new;
+  wired into `accounts/[id]/page.tsx`). The GTM agent has always generated
+  `draftEmail`, `draftLinkedIn`, and `callOpener` on every account -- real
+  token cost every time -- but only `draftEmail` was ever shown, inside a
+  collapsed `<details>` with no way to copy it. Now:
+  - Tabbed by channel (Email / LinkedIn / Call opener), not three stacked
+    blocks -- a salesperson already knows which channel they're using, so
+    showing all three at once is just scrolling past two they won't use
+    right now.
+  - The call opener is styled distinctly (larger, quoted, the display
+    font) from the two written channels -- it's meant to be glanced at
+    right before speaking, not read as a document, so it shouldn't look
+    like one.
+  - A real copy-to-clipboard button per channel, with visible confirmation
+    (icon + label swap to a checkmark and "Copied," reverting after ~2s),
+    replacing "select the text by hand."
+  - Fixed a real mobile bug found while checking this: at a 390px
+    viewport, "Call opener" wrapped onto two lines, leaving the tab row
+    visibly lopsided against its neighbors -- a `shortLabel` ("Call")
+    swaps in below the `sm` breakpoint so all three tabs stay on one line
+    without clipping or an unexplained horizontal scroll.
+  - The "Recommended outreach" card moved out of the 2-column grid it
+    shared with "Recommended persona" into its own full-width row -- once
+    it holds three tabs and potentially long drafts, squeezing it next to
+    a much shorter card produced an awkward height mismatch.
+  - Verified by actually rendering the component (not just reading the
+    code): a temporary, unlinked preview route rendered `OutreachChannels`
+    with realistic sample data (this sandbox can't reach the live
+    database the real page needs) and was screenshotted at desktop and
+    390px via Playwright -- caught the tab-wrapping bug above, which
+    reading the code alone would not have caught. The route, and the
+    temporary middleware exemption it needed, were both removed before
+    this shipped; nothing about them is in the diff.
+  - `scripts/seed.ts`'s demo accounts now have real (not `null`) content
+    for all three fields, personalized per account the same way `angle`/
+    `talkingPoints` already were, so the demo actually shows this off.
 - **Tests + CI on the deterministic core, and DB indexes/foreign keys/
   cascading delete.** Second pass after the audit's P0 fixes above --
   closes out the P1 tier: tests, DB integrity, and real analytics.
