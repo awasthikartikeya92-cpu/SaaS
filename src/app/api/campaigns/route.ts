@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     await assertCanCreateCampaign(organizationId);
   } catch (err) {
     if (err instanceof QuotaExceededError) {
-      track("quota_blocked", { organizationId, planId: err.planId });
+      await track("quota_blocked", { organizationId, planId: err.planId });
       return NextResponse.json(
         { error: err.message, planId: err.planId, limit: err.limit, used: err.used },
         { status: 402 }
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     })
     .returning();
 
-  track("campaign_created", { organizationId, campaignId: campaign.id });
+  await track("campaign_created", { organizationId, campaignId: campaign.id });
 
   return NextResponse.json({ id: campaign.id });
 }

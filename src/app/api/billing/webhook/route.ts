@@ -46,7 +46,7 @@ export async function POST(req: Request) {
             subscriptionStatus: "active",
           })
           .where(eq(organizations.id, organizationId));
-        track("subscription_activated", { organizationId, planId });
+        await track("subscription_activated", { organizationId, planId });
       }
       break;
     }
@@ -76,7 +76,7 @@ export async function POST(req: Request) {
           .update(organizations)
           .set({ plan: DEFAULT_PLAN, subscriptionStatus: "canceled" })
           .where(eq(organizations.id, organizationId));
-        track("subscription_canceled", { organizationId });
+        await track("subscription_canceled", { organizationId });
       }
       break;
     }

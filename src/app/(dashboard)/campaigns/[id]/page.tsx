@@ -10,6 +10,7 @@ import { OpportunityScore } from "@/components/dashboard/score-bar";
 import { TierBadge } from "@/components/dashboard/tier-badge";
 import { RefreshButton } from "@/components/dashboard/refresh-button";
 import { GenerationProgress } from "@/components/dashboard/generation-progress";
+import { DeleteCampaignButton } from "@/components/dashboard/delete-campaign-button";
 
 const ACCOUNT_STATUS_LABEL: Record<string, string> = {
   pending: "Queued",
@@ -70,7 +71,10 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           </div>
           {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
         </div>
-        {campaign.status === "failed" && <RefreshButton />}
+        <div className="flex items-center gap-2">
+          {campaign.status === "failed" && <RefreshButton />}
+          <DeleteCampaignButton campaignId={id} campaignName={campaign.name} redirectTo="/campaigns" variant="destructive" />
+        </div>
       </div>
 
       {stillGenerating && <GenerationProgress campaignId={id} initial={progress} />}

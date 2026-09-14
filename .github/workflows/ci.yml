@@ -1,0 +1,47 @@
+name: CI
+
+# There was no CI at all before this -- every regression in this project
+# had been found the same way: in production, from a user's screenshot.
+# This runs the checks that were previously only ever run by hand before a
+# commit (tsc, lint, the test suite, a full production build) on every push
+# and pull request, so a regression is caught before it merges rather than
+# after it deploys. See docs/launch-checklist.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        # No live database is reachable in CI (same restriction noted
+        # throughout this codebase for this sandbox) -- DATABASE_URL is a
+        # syntactically valid but unreachable placeholder. That's fine for
+        # `next build`: it type-checks and statically renders pages that
+        # don't need a real DB connection (see next.config.ts/the dynamic
+        # route list in README.md) without needing one to actually be live.
+        # AUTH_SECRET is required for the auth config to construct at all.
+        env:
+          DATABASE_URL: "postgres://ci:ci@localhost:5432/ci"
+          AUTH_SECRET: "ci-placeholder-secret-not-used-for-anything-real"
+        run: npm run build

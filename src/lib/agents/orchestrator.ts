@@ -27,6 +27,7 @@ import type { OfferingDna, IcpProfile } from "./schemas";
 import { setAiUsageSink, withAiUsageContext } from "@/lib/ai/usage-context";
 import { recordAiUsageEvent } from "@/lib/billing/usage-tracking";
 import { getGenerationProgress, type GenerationProgress } from "@/lib/db/queries";
+import { decideStageAction } from "./stage-decision";
 
 // Registered once per process. Every AiProvider.complete() call reports
 // through this sink when it runs inside the withAiUsageContext() below.
@@ -145,8 +146,9 @@ async function stageGate(campaignId: string, agent: string, run: () => Promise<v
     .from(researchRuns)
     .where(and(eq(researchRuns.campaignId, campaignId), eq(researchRuns.agent, agent)))
     .limit(1);
-  if (existing?.status === "success") return false; // done -- caller continues to the next stage
-  if (existing?.status === "running") return true; // in flight elsewhere -- wait, don't restart it
+  const decision = decideStageAction(existing?.status);
+  if (decision === "already-done") return false; // caller continues to the next stage
+  if (decision === "in-flight") return true; // in flight elsewhere -- wait, don't restart it
   await run();
   return true;
 }

@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       return newUser;
     });
 
-    track("signup", { organizationId: user.organizationId, userId: user.id });
+    await track("signup", { organizationId: user.organizationId, userId: user.id });
 
     return NextResponse.json({ id: user.id }, { status: 201 });
   } catch (err) {

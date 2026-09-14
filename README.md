@@ -153,9 +153,11 @@ didn't run:
 - **Stripe billing scaffolding** (`/api/billing/checkout`, `/api/billing/webhook`)
   -- dormant (returns 501) until `STRIPE_SECRET_KEY` is set, so this ships
   without forcing a Stripe account today.
-- **Product analytics seam** (`src/lib/analytics/track.ts`) -- no-ops until
-  `POSTHOG_KEY` is set; call sites already exist at the events that matter
-  for activation/retention tracking.
+- **Product analytics, wired to PostHog** (`src/lib/analytics/track.ts`) --
+  posts directly to PostHog's HTTP capture API (no SDK dependency) once
+  `POSTHOG_KEY` is set; no-ops until then. Call sites cover signup, campaign
+  create/delete, generation succeeded/failed, quota blocks, and the billing
+  funnel (checkout started, subscription activated/canceled).
 - **Plan & usage in Settings** -- current plan, this month's real AI
   token/cost usage per agent, and an Upgrade button per priced plan.
 - **Legal drafts** (`legal/terms.md`, `legal/privacy.md`) -- founder-drafted
@@ -173,10 +175,16 @@ a real research provider).
 ```bash
 npm run dev          # local dev server
 npm run build         # production build (verified clean, no TS errors)
+npm test               # vitest -- the deterministic core (scoring, JSON parsing,
+                        # verification, the resumable-pipeline state machine's
+                        # decision logic); see "What's tested" below
 npm run db:generate    # generate migration SQL from schema.ts (no live DB needed)
 npm run db:push         # push schema.ts to the Postgres DB in DATABASE_URL/STORAGE_DATABASE_URL
 npm run db:seed          # seed a demo org/user/campaign (insert, not upsert -- see "Quick start")
 ```
+
+`.github/workflows/ci.yml` runs typecheck, lint, `npm test`, and a full
+build on every push/PR -- there was no CI at all before this pass.
 
 There's deliberately no `db:reset`/wipe script -- that made sense against a
 disposable local SQLite file in Phase 1, but a "drop and reseed" command is
@@ -206,16 +214,41 @@ src/app/(dashboard)/          -- Overview, Campaigns, Accounts, Signals, Contact
 src/app/api/                    -- campaigns, agent-pipeline trigger, reports, auth, billing
 ```
 
+## What's tested
+
+`npm test` (vitest) covers the pure, deterministic core -- deliberately not
+anything needing a live Postgres connection (unreachable from the sandbox
+this was built in, same restriction noted throughout this codebase):
+
+- `src/lib/scoring/` -- every scoring function, including regression tests
+  for three real bugs a full product audit found and fixed here (icpFit
+  frozen at 71.3 for every account, reachability discarding
+  `contactConfidence` entirely, intent double-counting confidence under two
+  field names) -- see `docs/launch-checklist.md`.
+- `src/lib/agents/schemas.ts` -- `parseJson`'s balanced-brace JSON
+  extraction (code fences, leading/trailing prose, braces inside string
+  values) and the defensive Zod primitives (0-100 -> 0-1 confidence
+  coercion, graceful degradation on a wrong-shaped field).
+- `src/lib/agents/verification-agent.ts` -- the deterministic evidence
+  filter (source URL + excerpt length required) and confidence assignment.
+- `src/lib/agents/stage-decision.ts` -- the resumable pipeline's core
+  decision (done / in-flight / not-started), pulled out of
+  `orchestrator.ts` specifically so it's testable without a live DB
+  connection; this is what prevents two overlapping step calls from both
+  trying to create the same campaign's offering/ICP/signal-taxonomy row.
+
 ## Verified
 
 - `npm run build` -- clean, no TypeScript errors, no warnings
+- `npm test` -- 38 tests passing across the four files above
 - Full login -> dashboard -> campaign -> account-detail flow smoke-tested
   against seeded data with a production server, every page returns 200 with
   real content (not an error page)
 - Campaign creation API verified end-to-end (DB write confirmed), including
   the free-tier quota check (blocks with HTTP 402 at the monthly cap)
 - Postgres migration SQL generated and typechecked against `schema.ts`
-  (22 tables)
+  (22 tables, now with foreign keys and indexes throughout -- see
+  `docs/launch-checklist.md`)
 - Deployed to Vercel against a live Prisma Postgres database: signup,
   login, and campaign creation confirmed working in production
 

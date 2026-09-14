@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     subscription_data: { metadata: { organizationId, planId } },
   });
 
-  track("checkout_started", { organizationId, planId });
+  await track("checkout_started", { organizationId, planId });
 
   return NextResponse.json({ url: checkoutSession.url });
 }

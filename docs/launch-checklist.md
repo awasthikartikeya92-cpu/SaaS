@@ -7,6 +7,62 @@ worked through top to bottom.
 
 ## Already built in this pass
 
+- **Tests + CI on the deterministic core, and DB indexes/foreign keys/
+  cascading delete.** Second pass after the audit's P0 fixes above --
+  closes out the P1 tier: tests, DB integrity, and real analytics.
+  - `npm test` (vitest, `.github/workflows/ci.yml` runs it on every push/
+    PR alongside typecheck/lint/build): 38 tests across
+    `src/lib/scoring/`, `src/lib/agents/schemas.ts`'s `parseJson`,
+    `src/lib/agents/verification-agent.ts`, and a new
+    `src/lib/agents/stage-decision.ts` -- the resumable pipeline's core
+    done/in-flight/not-started decision, pulled out of orchestrator.ts
+    specifically so it's testable without a live Postgres connection
+    (importing that file at all throws immediately without a real
+    connection string -- see src/lib/db/index.ts). See README.md's "What's
+    tested" for the full list; several tests are explicit regression
+    guards for the exact scoring bugs fixed just above.
+  - `src/lib/db/schema.ts`: every table now has proper foreign keys (20
+    constraints, all `ON DELETE cascade`) and indexes (19, matched to the
+    actual query patterns in `queries.ts`/`orchestrator.ts` -- e.g.
+    `accounts(campaign_id, status)` for the resumable pipeline's hottest
+    query). Deliberately excluded: `ai_usage_events` has no FK to
+    campaigns/organizations at all -- it's a billing/audit trail, and
+    either a hard constraint (blocks deleting any campaign that ever made
+    an AI call -- i.e. all of them) or a cascade (silently erases the
+    record that money was spent) would be wrong; see that table's comment
+    in schema.ts. Migration: `drizzle/0003_fine_the_hand.sql`.
+    **Risk, stated plainly**: this ships as a single migration applied via
+    the existing `drizzle-kit push --force` in `vercel-build`. Adding a
+    FOREIGN KEY constraint fails if any existing row already violates it
+    (an orphaned reference). That's fail-safe, not silently destructive --
+    Vercel won't cut over to a build that failed, so current production
+    stays live either way -- but if your first deploy after this fails,
+    that's almost certainly why; the build log will name the exact
+    constraint and table.
+  - **Campaigns can finally be deleted** (`DELETE /api/campaigns/[id]`, a
+    delete button on both the campaigns list and campaign detail pages).
+    There was no delete path anywhere in the app before this -- a wasted
+    free-tier slot (a typo'd test campaign, one that failed and can't be
+    retried) was permanent, since quota counts campaigns. Deleting a
+    campaign cascades to everything it produced (accounts, signals,
+    contacts, outreach, research runs/sources, reports) via the FK
+    constraints above -- one delete, not a manual cleanup script. Usage/
+    billing history for that campaign deliberately survives (see the
+    ai_usage_events note above).
+  - **Analytics actually send now** (`src/lib/analytics/track.ts`) --
+    previously a no-op even with `POSTHOG_KEY` set (a literal `void event;
+    void properties;` TODO). Posts directly to PostHog's HTTP capture API
+    (no SDK dependency, same pattern as the Tavily/SEC EDGAR research
+    providers) with a 5s timeout and swallowed errors -- an analytics
+    outage must never break the real operation it's describing. Every call
+    site now `await`s it (serverless functions can freeze immediately
+    after sending a response, so a fire-and-forget call risked never
+    actually being sent); `distinct_id` prefers `organizationId` since
+    that's the one identity meaningful across this app today. Also fixed a
+    duplicate-event risk in the generate-step route: a stray poll after
+    the client already saw "active"/"failed" would previously re-fire the
+    success/failure event on every redundant call, not just the one real
+    transition.
 - **Fixed cross-tenant data exposure on every detail route** (a full
   product audit found this, consistently, in 4 places): campaign detail,
   account detail, and report detail pages all fetched their resource by id
@@ -373,9 +429,11 @@ to the signup form.
 ### 6. Optional, not yet scaffolded
 - Error monitoring (e.g. Sentry) — not wired up in this pass; worth adding
   before real users hit production.
-- Real research provider (Tavily/Exa/Serper) — still mock data per the
-  Phase 1 README; this is the other cost center once it's live, and should
-  get the same usage-instrumentation treatment as the Anthropic calls.
 - Password reset / "forgot password" -- there's no self-serve flow yet;
   handle it manually (reset via `db:seed`-style script, or a direct DB
   update) until this exists.
+
+Real research providers (Tavily, SEC EDGAR) are built now -- see the
+"Already built in this pass" sections above; USASpending.gov/SAM.gov and
+real firmographic enrichment are the next signal sources in that same
+direction, not yet built.

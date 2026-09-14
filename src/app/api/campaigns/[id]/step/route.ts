@@ -34,12 +34,26 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const owned = await getOwnedCampaign(id, session.user!.organizationId as string);
   if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Whether this campaign was ALREADY terminal before this call --
+  // runNextStep() is safe to call again on a terminal campaign (it's a
+  // no-op that just re-reports current progress, see its own comment), but
+  // without this check a stray/duplicate poll after the client has already
+  // seen "active"/"failed" would re-fire the success/failure event every
+  // single time it's called again, not just on the one real transition.
+  const wasAlreadyTerminal = owned.status === "active" || owned.status === "failed";
+
   try {
     const progress = await runNextStep(id);
-    if (progress.campaignStatus === "active" && progress.stage === "complete") {
-      track("campaign_generate_succeeded", { campaignId: id });
-    } else if (progress.campaignStatus === "failed") {
-      track("campaign_generate_failed", { campaignId: id, error: progress.lastError ?? "unknown" });
+    if (!wasAlreadyTerminal) {
+      if (progress.campaignStatus === "active" && progress.stage === "complete") {
+        await track("campaign_generate_succeeded", { campaignId: id, organizationId: owned.organizationId });
+      } else if (progress.campaignStatus === "failed") {
+        await track("campaign_generate_failed", {
+          campaignId: id,
+          organizationId: owned.organizationId,
+          error: progress.lastError ?? "unknown",
+        });
+      }
     }
     return NextResponse.json(progress);
   } catch (err) {

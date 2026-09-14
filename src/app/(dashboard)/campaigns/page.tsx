@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
+import { DeleteCampaignButton } from "@/components/dashboard/delete-campaign-button";
 
 export default async function CampaignsPage() {
   const session = await auth();
@@ -38,6 +39,7 @@ export default async function CampaignsPage() {
               <TableHead>Status</TableHead>
               <TableHead>Industries</TableHead>
               <TableHead>Created</TableHead>
+              <TableHead className="text-right">&nbsp;</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -49,6 +51,9 @@ export default async function CampaignsPage() {
                 <TableCell><StatusBadge status={c.status} /></TableCell>
                 <TableCell className="text-ink-soft">{c.targetIndustries.join(", ")}</TableCell>
                 <TableCell className="text-ink-soft">{formatDate(c.createdAt)}</TableCell>
+                <TableCell className="text-right">
+                  <DeleteCampaignButton campaignId={c.id} campaignName={c.name} variant="ghost" />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
