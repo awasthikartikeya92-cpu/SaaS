@@ -18,8 +18,8 @@ export interface ReportContent {
  * structure; sections 6 (account intelligence detail) and 10 (evidence/
  * sources) live on the per-account page rather than duplicated here.
  */
-export async function buildReportContent(campaignId: string): Promise<ReportContent | null> {
-  const data = await getCampaignDetail(campaignId);
+export async function buildReportContent(campaignId: string, organizationId: string): Promise<ReportContent | null> {
+  const data = await getCampaignDetail(campaignId, organizationId);
   if (!data) return null;
 
   const priority = data.accounts

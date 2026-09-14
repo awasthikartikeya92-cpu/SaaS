@@ -13,8 +13,31 @@ import {
   signalDefinitions,
   researchSources,
   researchRuns,
+  reports,
 } from "./schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
+
+/**
+ * The single source of truth for "does this campaign belong to this org."
+ * Every function below that takes a campaignId (or an id that resolves to
+ * one, like an account or report) goes through this -- filtering by
+ * organizationId in the SQL WHERE clause itself, not as a check applied
+ * after the row is already in memory. That matters: a post-hoc check is
+ * one `if` a future call site can forget to add (see docs/launch-checklist.md
+ * for the audit that found exactly that, four times, across the detail
+ * pages and the generate-step route); requiring organizationId as a
+ * parameter here makes the caller's organizationId part of the query
+ * itself, so there's no code path that can return another org's row
+ * without deliberately bypassing this function entirely.
+ */
+export async function getOwnedCampaign(campaignId: string, organizationId: string) {
+  const [campaign] = await db
+    .select()
+    .from(campaigns)
+    .where(and(eq(campaigns.id, campaignId), eq(campaigns.organizationId, organizationId)))
+    .limit(1);
+  return campaign ?? null;
+}
 
 export async function getDashboardData(organizationId: string) {
   const orgCampaigns = await db.select().from(campaigns).where(eq(campaigns.organizationId, organizationId));
@@ -84,8 +107,8 @@ function emptyKpis() {
   };
 }
 
-export async function getCampaignDetail(campaignId: string) {
-  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+export async function getCampaignDetail(campaignId: string, organizationId: string) {
+  const campaign = await getOwnedCampaign(campaignId, organizationId);
   if (!campaign) return null;
 
   const [dna] = await db.select().from(offeringDna).where(eq(offeringDna.campaignId, campaignId)).limit(1);
@@ -146,8 +169,11 @@ export interface GenerationProgress {
   lastError: string | null;
 }
 
-export async function getGenerationProgress(campaignId: string): Promise<GenerationProgress | null> {
-  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+export async function getGenerationProgress(
+  campaignId: string,
+  organizationId: string
+): Promise<GenerationProgress | null> {
+  const campaign = await getOwnedCampaign(campaignId, organizationId);
   if (!campaign) return null;
 
   const runs = await db
@@ -201,9 +227,18 @@ export async function getGenerationProgress(campaignId: string): Promise<Generat
   };
 }
 
-export async function getAccountDetail(accountId: string) {
+export async function getAccountDetail(accountId: string, organizationId: string) {
   const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
   if (!account) return null;
+  // Accounts don't carry organizationId directly (only campaignId) -- an
+  // account belongs to an org transitively, through its campaign. Checking
+  // here, before any of the account's own data is assembled below, is what
+  // stops one org's accounts from being readable by another (see
+  // getOwnedCampaign's comment for why this is a required parameter, not a
+  // caller-side check).
+  const campaign = await getOwnedCampaign(account.campaignId, organizationId);
+  if (!campaign) return null;
+
   const [score] = await db.select().from(accountScores).where(eq(accountScores.accountId, accountId)).limit(1);
   const signals = await db.select().from(accountSignals).where(eq(accountSignals.accountId, accountId));
   const sourceIds = signals.map((s) => s.sourceId);
@@ -218,7 +253,6 @@ export async function getAccountDetail(accountId: string) {
     .where(eq(outreachRecommendations.accountId, accountId))
     .orderBy(desc(outreachRecommendations.generatedAt))
     .limit(1);
-  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, account.campaignId)).limit(1);
 
   return {
     account,
@@ -228,6 +262,20 @@ export async function getAccountDetail(accountId: string) {
     contacts: accountContacts,
     outreach: outreach ?? null,
   };
+}
+
+/**
+ * Same transitive-ownership pattern as getAccountDetail: a report only
+ * carries campaignId, not organizationId, so ownership is checked through
+ * its parent campaign. Returns both, since every current caller needs the
+ * campaign too (its name, for the report header).
+ */
+export async function getOwnedReport(reportId: string, organizationId: string) {
+  const [report] = await db.select().from(reports).where(eq(reports.id, reportId)).limit(1);
+  if (!report) return null;
+  const campaign = await getOwnedCampaign(report.campaignId, organizationId);
+  if (!campaign) return null;
+  return { report, campaign };
 }
 
 export async function getAllSignals(organizationId: string) {

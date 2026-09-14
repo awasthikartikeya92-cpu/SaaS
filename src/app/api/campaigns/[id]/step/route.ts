@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { runNextStep } from "@/lib/agents/orchestrator";
+import { getOwnedCampaign } from "@/lib/db/queries";
 import { track } from "@/lib/analytics/track";
 
 // This is called repeatedly -- the campaign page polls it every couple of
@@ -23,6 +24,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+
+  // Authenticated only proves *a* valid session -- not that this session's
+  // org owns campaign `id`. Without this, any signed-in user could drive
+  // (and pay for, via the shared Anthropic key) generation on any other
+  // org's campaign by guessing/enumerating its id, and read back that org's
+  // company names and failure details in the response. 404, not 403: this
+  // shouldn't confirm to a stranger that the id exists at all.
+  const owned = await getOwnedCampaign(id, session.user!.organizationId as string);
+  if (!owned) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
     const progress = await runNextStep(id);

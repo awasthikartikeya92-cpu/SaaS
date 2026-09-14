@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { auth } from "@/auth";
 import { getAccountDetail } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,10 @@ import { formatDate } from "@/lib/utils";
 
 export default async function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await getAccountDetail(id);
+  const session = await auth();
+  // Scoped to this org transitively, through the account's parent campaign
+  // -- see getAccountDetail's comment in db/queries.ts.
+  const data = await getAccountDetail(id, session!.user!.organizationId as string);
   if (!data) notFound();
 
   const { account, campaign, score, signals, contacts, outreach } = data;

@@ -61,7 +61,7 @@ export async function runNextStep(campaignId: string): Promise<GenerationProgres
   // Terminal already -- calling this again (a stray poll after the client
   // already saw "active"/"failed", a page reload) is a safe no-op.
   if (campaign.status === "active" || campaign.status === "failed") {
-    return mustProgress(campaignId);
+    return mustProgress(campaignId, campaign.organizationId);
   }
 
   if (campaign.status === "draft") {
@@ -70,16 +70,16 @@ export async function runNextStep(campaignId: string): Promise<GenerationProgres
 
   try {
     if (await stageGate(campaignId, "offering-agent", () => stepOffering(campaign, campaignId))) {
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
     if (await stageGate(campaignId, "icp-agent", () => stepIcp(campaign, campaignId))) {
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
     if (await stageGate(campaignId, "signal-agent", () => stepSignal(campaign, campaignId))) {
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
     if (await stageGate(campaignId, "research-agent", () => stepResearchAndSeedAccounts(campaign, campaignId))) {
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
 
     // Shared, once-per-campaign stages are all done. From here it's one
@@ -93,7 +93,7 @@ export async function runNextStep(campaignId: string): Promise<GenerationProgres
       .limit(1);
     if (nextPending) {
       await stepContact(campaign, nextPending);
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
 
     const [nextContacted] = await db
@@ -103,13 +103,13 @@ export async function runNextStep(campaignId: string): Promise<GenerationProgres
       .limit(1);
     if (nextContacted) {
       await stepGtm(campaign, nextContacted);
-      return mustProgress(campaignId);
+      return mustProgress(campaignId, campaign.organizationId);
     }
 
     // Nothing left pending or contacted (including the zero-accounts case,
     // if research found nothing) -- the pipeline is done.
     await db.update(campaigns).set({ status: "active" }).where(eq(campaigns.id, campaignId));
-    return mustProgress(campaignId);
+    return mustProgress(campaignId, campaign.organizationId);
   } catch {
     // A failure in one of the four shared stages above has no "other
     // accounts" to preserve -- they run once per campaign, not once per
@@ -118,7 +118,7 @@ export async function runNextStep(campaignId: string): Promise<GenerationProgres
     // is already recorded on that stage's research_runs row by logRun()
     // before it rethrows -- nothing more to capture here.
     await db.update(campaigns).set({ status: "failed" }).where(eq(campaigns.id, campaignId));
-    return mustProgress(campaignId);
+    return mustProgress(campaignId, campaign.organizationId);
   }
 }
 
@@ -151,8 +151,8 @@ async function stageGate(campaignId: string, agent: string, run: () => Promise<v
   return true;
 }
 
-async function mustProgress(campaignId: string): Promise<GenerationProgress> {
-  const progress = await getGenerationProgress(campaignId);
+async function mustProgress(campaignId: string, organizationId: string): Promise<GenerationProgress> {
+  const progress = await getGenerationProgress(campaignId, organizationId);
   if (!progress) throw new Error("Campaign not found");
   return progress;
 }

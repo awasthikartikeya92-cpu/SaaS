@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { auth } from "@/auth";
 import { getCampaignDetail, getGenerationProgress } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -19,7 +20,17 @@ const ACCOUNT_STATUS_LABEL: Record<string, string> = {
 
 export default async function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [data, progress] = await Promise.all([getCampaignDetail(id), getGenerationProgress(id)]);
+  const session = await auth();
+  // Both queries are scoped to this org internally (see getOwnedCampaign in
+  // db/queries.ts) -- a campaign belonging to a different org comes back as
+  // null from each, indistinguishable here from "doesn't exist," which is
+  // exactly what we want: notFound() rather than a 403 that would confirm
+  // the id exists.
+  const organizationId = session!.user!.organizationId as string;
+  const [data, progress] = await Promise.all([
+    getCampaignDetail(id, organizationId),
+    getGenerationProgress(id, organizationId),
+  ]);
   if (!data || !progress) notFound();
 
   const { campaign, offeringDna, personas, icp, signals, accounts, latestRun } = data;

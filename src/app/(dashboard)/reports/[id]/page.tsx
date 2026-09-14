@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
-import { reports, campaigns } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { auth } from "@/auth";
+import { getOwnedReport } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,9 +8,15 @@ import type { ReportContent } from "@/lib/agents/report-agent";
 
 export default async function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [report] = await db.select().from(reports).where(eq(reports.id, id)).limit(1);
-  if (!report) notFound();
-  const [campaign] = await db.select().from(campaigns).where(eq(campaigns.id, report.campaignId)).limit(1);
+  const session = await auth();
+  // This page is already behind the auth middleware (src/proxy.ts), so
+  // session always exists here -- but that only guarantees *a* valid
+  // session, not that *this* report belongs to it. getOwnedReport is what
+  // enforces the latter, by campaign ownership (reports don't carry
+  // organizationId directly -- see its comment in db/queries.ts).
+  const owned = await getOwnedReport(id, session!.user!.organizationId as string);
+  if (!owned) notFound();
+  const { report, campaign } = owned;
   const content = report.content as ReportContent;
 
   return (
