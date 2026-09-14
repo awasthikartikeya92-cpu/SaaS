@@ -22,7 +22,7 @@ import { runResearchAgent } from "./research-agent";
 import { runVerificationAgent, type VerifiedSignal } from "./verification-agent";
 import { runContactAgent } from "./contact-agent";
 import { runGtmAgent } from "./gtm-agent";
-import { computeIcpFit, computeIntent, computeReachability, computeOpportunityScore } from "@/lib/scoring";
+import { computeIcpFit, computeIntent, computeReachability, computeRoleRelevance, computeOpportunityScore } from "@/lib/scoring";
 import type { OfferingDna, IcpProfile } from "./schemas";
 import { setAiUsageSink, withAiUsageContext } from "@/lib/ai/usage-context";
 import { recordAiUsageEvent } from "@/lib/billing/usage-tracking";
@@ -330,7 +330,19 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
       })
       .returning();
 
-    for (const sig of signalsForCompany) {
+    // Matched once per signal and reused below for both the persisted
+    // accountSignals row and the intent calculation -- these used to be two
+    // separate lookups (a fuzzy substring match here, an exact-name match
+    // down in computeIntent's input) that almost never agreed, since
+    // sig.signalHint is essentially never byte-identical to a taxonomy
+    // entry's name. That silently made computeIntent treat nearly every
+    // signal as the weakest tier (the `?? 3` fallback), regardless of what
+    // tier the account's own signal list showed the user.
+    const matchedTaxonomyEntries = signalsForCompany.map((sig) =>
+      taxonomy.signals.find((t) => sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8)))
+    );
+
+    for (const [i, sig] of signalsForCompany.entries()) {
       const [sourceRow] = await db
         .insert(researchSources)
         .values({
@@ -341,9 +353,7 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
         })
         .returning();
 
-      const matchedTaxonomyEntry = taxonomy.signals.find((t) =>
-        sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8))
-      );
+      const matchedTaxonomyEntry = matchedTaxonomyEntries[i];
 
       await db.insert(accountSignals).values({
         accountId: account.id,
@@ -360,7 +370,19 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
     }
 
     const icpFit = computeIcpFit({
-      industryMatch: industry && icp.industries.includes(industry) ? 90 : 45,
+      // `industry` above is always icp.industries[0] -- there's no
+      // firmographic enrichment connected yet to independently verify
+      // which industry an account actually operates in (see
+      // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap item).
+      // The previous `icp.industries.includes(industry) ? 90 : 45` check
+      // was tautological -- industry was assigned FROM that exact array
+      // moments earlier, so it was always true, always 90, on every single
+      // account in every campaign, while looking like a real per-account
+      // comparison. Flattened to the same honest, clearly-labeled
+      // placeholder as the sub-scores below rather than a check that's
+      // always true dressed up as a real one -- until real firmographic
+      // data exists to genuinely tell accounts apart on this dimension.
+      industryMatch: 65,
       geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
       sizeMatch: 65,
       businessModelMatch: 65,
@@ -368,9 +390,8 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
       problemRelevance: 70,
     });
     const intent = computeIntent(
-      signalsForCompany.map((s) => ({
-        tier: (taxonomy.signals.find((t) => t.name === s.signalHint)?.tier ?? 3) as 1 | 2 | 3,
-        strength: s.confidence * 100,
+      signalsForCompany.map((s, i) => ({
+        tier: (matchedTaxonomyEntries[i]?.tier ?? 3) as 1 | 2 | 3,
         confidence: s.confidence,
         detectedAt: new Date(s.detectedAt),
       }))
@@ -410,7 +431,12 @@ async function stepContact(campaign: typeof campaigns.$inferSelect, account: typ
     const [score] = await db.select().from(accountScores).where(eq(accountScores.accountId, account.id)).limit(1);
     const reachability = computeReachability({
       decisionMakerIdentified: false,
-      roleRelevance: 80,
+      // Was a flat 80 for every account -- computeRoleRelevance uses real
+      // data instead: does the Contact Agent's recommended title actually
+      // match one of the buyer personas the Offering Agent derived from
+      // what the user described, or is it a generic guess unrelated to any
+      // stated persona? See src/lib/scoring/index.ts.
+      roleRelevance: computeRoleRelevance(contact.title, offeringDna.personas.map((p) => p.title)),
       contactConfidence: contact.confidence,
     });
     const opportunity = computeOpportunityScore(score.icpFit, score.intent, reachability);

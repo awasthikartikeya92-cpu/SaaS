@@ -38,7 +38,7 @@ export default async function OverviewPage() {
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Kpi label="Accounts analyzed" value={kpis.accountsAnalyzed} />
-        <Kpi label="ICP matches" value={kpis.icpMatches} />
+        <Kpi label="Verified accounts" value={kpis.accountsWithVerifiedSignal} />
         <Kpi label="Active-intent accounts" value={kpis.activeIntentAccounts} />
         <Kpi label="High-priority accounts" value={kpis.highPriorityAccounts} />
       </div>

@@ -73,8 +73,30 @@ export async function getDashboardData(organizationId: string) {
     .map((s) => ({ ...s, account: orgAccounts.find((a) => a.id === s.accountId) }));
 
   const decisionMakersIdentified = contactRows.filter((c) => c.isVerified).length;
-  const highPriority = accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 70).length;
+  // Was `opportunity >= 70` / `>= 75` / `< 50`, chosen back when icpFit
+  // ranged 45-90 (in practice always landing on 71.3 -- see
+  // src/lib/scoring/index.ts). icpFit is now an honestly-labeled flat 65
+  // placeholder until real firmographic data exists to genuinely
+  // differentiate accounts on it, which narrowed the achievable opportunity
+  // range to roughly 54-73 (intent and reachability now do all the real
+  // differentiating -- see computeReachability/computeRoleRelevance).
+  // Recalibrated so all three tiers are actually reachable against that
+  // real range instead of two of them sitting above the achievable
+  // ceiling. Revisit these numbers once firmographic enrichment ships and
+  // icpFit varies for real -- they're a judgment call against today's
+  // distribution, the same as the original numbers were, not a derived
+  // constant.
+  const highPriority = accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 62).length;
   const activeIntent = accountsWithScore.filter((a) => (a.score?.intent ?? 0) >= 50).length;
+  // "ICP matches" used to filter on icpFit >= 60 -- with icpFit currently a
+  // flat 65 for every account (see above), that filter is tautologically
+  // true for 100% of accounts, which is worse than uninformative: it reads
+  // as real ICP filtering when none is happening. Swapped to something
+  // that's actually real today -- accounts with at least one signal the
+  // Verification Agent could independently date and verify, reusing
+  // `signals` already fetched above rather than a new query.
+  const verifiedAccountIds = new Set(signals.filter((s) => s.verified).map((s) => s.accountId));
+  const accountsWithVerifiedSignal = orgAccounts.filter((a) => verifiedAccountIds.has(a.id)).length;
 
   return {
     campaigns: orgCampaigns,
@@ -83,13 +105,13 @@ export async function getDashboardData(organizationId: string) {
     latestSignals,
     kpis: {
       accountsAnalyzed: orgAccounts.length,
-      icpMatches: accountsWithScore.filter((a) => (a.score?.icpFit ?? 0) >= 60).length,
+      accountsWithVerifiedSignal,
       activeIntentAccounts: activeIntent,
       highPriorityAccounts: highPriority,
       decisionMakersIdentified,
-      hot: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 75).length,
-      warm: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 50 && (a.score?.opportunity ?? 0) < 75).length,
-      emerging: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) < 50).length,
+      hot: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 68).length,
+      warm: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 55 && (a.score?.opportunity ?? 0) < 68).length,
+      emerging: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) < 55).length,
     },
   };
 }
@@ -97,7 +119,7 @@ export async function getDashboardData(organizationId: string) {
 function emptyKpis() {
   return {
     accountsAnalyzed: 0,
-    icpMatches: 0,
+    accountsWithVerifiedSignal: 0,
     activeIntentAccounts: 0,
     highPriorityAccounts: 0,
     decisionMakersIdentified: 0,

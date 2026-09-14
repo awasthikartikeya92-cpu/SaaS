@@ -157,7 +157,7 @@ async function main() {
       techEnvironmentMatch: 65,
       problemRelevance: 80,
     });
-    const intent = computeIntent([{ tier: def.tier, strength: confidence * 100, confidence, detectedAt }]);
+    const intent = computeIntent([{ tier: def.tier, confidence, detectedAt }]);
     const reachability = computeReachability({ decisionMakerIdentified: false, roleRelevance: 80, contactConfidence: 0.6 });
     const opportunity = computeOpportunityScore(icpFit, intent, reachability);
 

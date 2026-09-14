@@ -7,6 +7,55 @@ worked through top to bottom.
 
 ## Already built in this pass
 
+- **Fixed cross-tenant data exposure on every detail route** (a full
+  product audit found this, consistently, in 4 places): campaign detail,
+  account detail, and report detail pages all fetched their resource by id
+  alone, with no check that it belonged to the caller's organization; the
+  campaign generate-step and report-creation API routes had the same gap.
+  `getOwnedCampaign()` (`src/lib/db/queries.ts`) is now the single source
+  of truth -- organizationId is filtered in the SQL WHERE clause itself,
+  and it's a required parameter everywhere a campaign is looked up, so
+  TypeScript itself catches a call site that forgets it (verified: the
+  refactor's `tsc` pass caught every downstream call site with zero missed
+  spots). See the commit for the full list of affected routes.
+- **The Opportunity score can now actually vary** -- the same audit found
+  it was effectively a coin flip disguised as a formula: icpFit was 71.3
+  on every account in every campaign (the "does industry match?" check was
+  tautological -- industry was assigned from the exact ICP array it was
+  then compared against) and reachability was exactly 24 always (the
+  early-return branch in `computeReachability` discarded
+  `contactConfidence` entirely). Combined, two of the formula's three
+  inputs were dead weight, and neither Hot (>=75) nor Emerging (<50) was
+  reachable by any account, ever.
+  - `computeReachability` now blends in `contactConfidence` even without a
+    verified decision maker (at reduced weight -- verified still matters
+    far more), instead of discarding it.
+  - `computeRoleRelevance` (new, `src/lib/scoring/index.ts`) replaces a
+    flat 80 with a real check: does the Contact Agent's recommended title
+    actually match one of the buyer personas the Offering Agent derived
+    from what the user described.
+  - The tautological `industryMatch` check is gone -- flattened to the
+    same honestly-labeled placeholder as icpFit's other sub-scores (real
+    variance here needs real firmographic data, which isn't connected
+    yet -- see the SEC EDGAR/firmographics item below).
+  - `computeIntent` no longer double-counts `confidence` under two names
+    (`strength` was always `confidence * 100` in every caller -- there's
+    no independent "signal strength" measurement anywhere in the pipeline
+    today) and no longer silently defaults nearly every signal to the
+    weakest tier (it was looking up each signal's tier with a *different,
+    stricter* match than the one used to persist that signal's tier in the
+    first place, so the two almost never agreed).
+  - Hot/Warm/Emerging thresholds recalibrated (68/55, was 75/50) to match
+    the real achievable range now that icpFit is an honest flat 65 instead
+    of a fake-precise 71.3 -- both tiers are reachable again. The
+    Overview page's "ICP matches" KPI (tautologically 100% of accounts,
+    for the same reason) is now "Verified accounts" -- real data reused
+    from what's already fetched, not a new query.
+  - Deliberately NOT fixed by inventing plausible-looking variance:
+    icpFit's other placeholder sub-scores (geography/size/business model/
+    tech) stay flat and clearly labeled as such until real firmographic
+    data exists. Faking that data to look more precise would repeat the
+    exact mistake being fixed here, just relocated.
 - **Generation is now a resumable series of short steps, not one long
   request** (`src/lib/agents/orchestrator.ts`, `POST /api/campaigns/[id]/step`,
   `src/components/dashboard/generation-progress.tsx`). This supersedes the
