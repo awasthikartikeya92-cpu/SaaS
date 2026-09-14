@@ -7,6 +7,61 @@ worked through top to bottom.
 
 ## Already built in this pass
 
+- **Prompt caching for the two agents that repeat real work** -- Contact
+  and GTM run once per account (`src/lib/agents/contact-agent.ts`,
+  `gtm-agent.ts`), up to `MAX_ACCOUNTS_PER_CAMPAIGN` times per campaign,
+  each time re-sending the *same* Offering DNA (and, for Contact, ICP) the
+  model has already seen for every other account in that campaign. Before
+  this, that shared context was serialized into one JSON blob with the
+  volatile `companyName` sitting first, so every byte of every call was
+  unique and there was nothing for Anthropic's prefix-based caching to
+  match against.
+  - `src/lib/ai/provider.ts`: `AiMessage.content` now also accepts an
+    ordered list of `{text, cacheable?}` segments alongside the existing
+    plain-string form -- a provider-agnostic way to mark "this text repeats
+    across many calls" without leaking Anthropic's own request shape into
+    the interface every agent codes against. A provider without
+    server-side caching (the still-unimplemented OpenAI stub) would just
+    concatenate every segment into one string; nothing here required
+    OpenAI-specific code because there isn't any yet to change.
+  - `src/lib/ai/anthropic-provider.ts` also now marks every agent's
+    **system prompt** cacheable, unconditionally -- every agent's SYSTEM
+    constant is a fixed string literal, identical across every call to
+    that agent for every account, every campaign, every organization, so
+    there's no case where this could be wrong to do, only degrees of how
+    much it helps.
+  - Contact/GTM now split their payload into a cacheable segment
+    (offeringDna, +icp for Contact) and a volatile one (companyName,
+    signals, recommendedTitle) instead of one combined JSON.stringify.
+  - Verified with a real request-shape capture (mocked `fetch`, not just
+    reading the code): confirmed the cacheable segment is **byte-identical
+    across two different accounts in the same campaign** -- the exact
+    condition that actually determines whether Anthropic's cache hits at
+    all -- that no per-account data leaks into it, that offeringDna isn't
+    duplicated into the volatile segment (which would silently defeat the
+    whole point), and that `cache_control` lands on exactly the intended
+    segment. Kept as permanent tests
+    (`src/lib/agents/prompt-caching.test.ts`), not a one-off script.
+  - Honest limit: Anthropic requires a minimum token count for a cacheable
+    segment to actually be cached (a few hundred to ~1-2k tokens depending
+    on model) -- below that, the `cache_control` marker is accepted but
+    silently doesn't cache anything. A very small Offering DNA + ICP on a
+    lightly-described offering may not clear that bar; there's no error or
+    downside either way, just no benefit for that campaign specifically.
+    Not verified against a live response (no reachable Anthropic key in
+    this sandbox -- same restriction as everywhere else it's been noted)
+    -- `response.usage.cache_read_input_tokens` on a real second-account
+    call is the actual confirmation once this deploys.
+- **A health check that actually checks something**
+  (`src/app/api/health/route.ts`) -- used to return `{ ok: true }`
+  unconditionally, without touching anything, so it could not detect the
+  single most likely real outage (the database being unreachable or out of
+  connections) and would report healthy for the entire time the app was
+  actually down for every real user. Now runs a trivial `select 1` through
+  the same `db` client every real query uses, returning 503 with the error
+  detail if it fails. Deliberately not a deeper readiness probe (asserting
+  something about schema/migration state) -- that's a different, heavier
+  check than "is the connection this app depends on alive."
 - **All three outreach drafts rendered, channel-appropriate, with a real
   copy affordance** (`src/components/dashboard/outreach-channels.tsx`, new;
   wired into `accounts/[id]/page.tsx`). The GTM agent has always generated

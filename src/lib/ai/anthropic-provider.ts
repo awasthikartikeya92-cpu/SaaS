@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { AiProvider, AiCompleteOptions } from "./provider";
+import type { AiProvider, AiCompleteOptions, AiMessage } from "./provider";
 import { reportAiUsage } from "./usage-context";
 
 // Bounded well under the generate route's 60s maxDuration (see that file) --
@@ -35,8 +35,18 @@ export class AnthropicProvider implements AiProvider {
       {
         model: resolvedModel,
         max_tokens: maxTokens,
-        system,
-        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        // Every agent's SYSTEM prompt (offering-agent.ts, contact-agent.ts,
+        // etc.) is a fixed string literal -- never built per-call with
+        // interpolated, request-specific data -- so it's always identical
+        // across every call to that agent, for every account, every
+        // campaign, every organization. That makes it always safe to mark
+        // cacheable unconditionally: worst case (a cold cache) this costs
+        // nothing extra, best case (the overwhelmingly common one, given
+        // how often these run) it's close to free on every call after the
+        // first. See src/lib/ai/provider.ts for the equivalent, opt-in
+        // mechanism for per-call message content.
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        messages: messages.map(toAnthropicMessage),
       },
       // maxRetries: 0 -- verified against the SDK's own retry logic
       // (node_modules/@anthropic-ai/sdk/client.js): a connection *timeout*
@@ -70,4 +80,26 @@ export class AnthropicProvider implements AiProvider {
     const textBlock = response.content.find((b) => b.type === "text");
     return textBlock && "text" in textBlock ? textBlock.text : "";
   }
+}
+
+/**
+ * A plain string AiMessage.content maps straight through, unchanged from
+ * before this file supported segments at all. An array of segments becomes
+ * an array of text content blocks, with cache_control on exactly the
+ * segments the caller marked cacheable -- see the AiMessage.content
+ * comment in provider.ts for why a segment might be marked that way, and
+ * contact-agent.ts/gtm-agent.ts for the two callers that actually do.
+ */
+function toAnthropicMessage(m: AiMessage): Anthropic.MessageParam {
+  if (typeof m.content === "string") {
+    return { role: m.role, content: m.content };
+  }
+  return {
+    role: m.role,
+    content: m.content.map((segment) => ({
+      type: "text",
+      text: segment.text,
+      ...(segment.cacheable ? { cache_control: { type: "ephemeral" as const } } : {}),
+    })),
+  };
 }

@@ -29,9 +29,28 @@ export interface ContactAgentInput {
 
 export async function runContactAgent(input: ContactAgentInput): Promise<ContactRecommendation> {
   const provider = getAiProvider();
+  const { offeringDna, icp, ...accountSpecific } = input;
   const raw = await provider.complete({
     system: SYSTEM,
-    messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
+    // Split so offeringDna+icp -- identical for every account in this
+    // campaign, and this agent runs once per account, up to
+    // MAX_ACCOUNTS_PER_CAMPAIGN times (orchestrator.ts) -- can be marked
+    // cacheable, while the one thing that actually varies per call
+    // (companyName/industry) stays uncached. Previously this was one
+    // JSON.stringify(input) with the volatile companyName sitting first,
+    // which made every byte of every call unique and left nothing for
+    // Anthropic's prefix-based caching to match against. See
+    // src/lib/ai/provider.ts for how a provider that doesn't support this
+    // (OpenAI) just concatenates both segments back into one string.
+    messages: [
+      {
+        role: "user",
+        content: [
+          { text: `Offering DNA and ICP -- shared context for every account in this campaign:\n${JSON.stringify({ offeringDna, icp }, null, 2)}\n\n`, cacheable: true },
+          { text: `Account to evaluate:\n${JSON.stringify(accountSpecific, null, 2)}` },
+        ],
+      },
+    ],
     model: getModelForAgent("contact-agent"),
   });
   const parsed = parseJson(raw, ContactRecommendationSchema);

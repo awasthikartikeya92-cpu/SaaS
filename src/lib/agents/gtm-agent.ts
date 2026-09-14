@@ -24,9 +24,22 @@ export interface GtmAgentInput {
 
 export async function runGtmAgent(input: GtmAgentInput): Promise<OutreachRecommendation> {
   const provider = getAiProvider();
+  const { offeringDna, ...accountSpecific } = input;
   const raw = await provider.complete({
     system: SYSTEM,
-    messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
+    // Same split as contact-agent.ts, same reasoning: offeringDna is
+    // identical for every account in this campaign; companyName/signals/
+    // recommendedTitle are what actually change per call. See
+    // src/lib/ai/provider.ts's AiMessage.content comment.
+    messages: [
+      {
+        role: "user",
+        content: [
+          { text: `Offering DNA -- shared context for every account in this campaign:\n${JSON.stringify({ offeringDna }, null, 2)}\n\n`, cacheable: true },
+          { text: `Account and signals to build outreach for:\n${JSON.stringify(accountSpecific, null, 2)}` },
+        ],
+      },
+    ],
     model: getModelForAgent("gtm-agent"),
     // Same reasoning as offering-agent.ts -- draftEmail/draftLinkedIn/
     // callOpener together can run long enough to risk truncating the
