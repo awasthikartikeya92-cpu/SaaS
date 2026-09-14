@@ -85,7 +85,7 @@ export default function NewCampaignPage() {
             <Field label="Differentiators">
               <Textarea required rows={3} value={form.differentiators} onChange={(e) => set("differentiators", e.target.value)} />
             </Field>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Target industries (comma-separated)">
                 <Input required value={form.targetIndustries} onChange={(e) => set("targetIndustries", e.target.value)} placeholder="Logistics, Retail" />
               </Field>

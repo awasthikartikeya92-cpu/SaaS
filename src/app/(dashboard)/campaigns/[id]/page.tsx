@@ -187,7 +187,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           {!offeringDna ? (
             <p className="text-sm text-ink-soft">Not generated yet.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <InfoCard title="Core problem"><p className="text-sm">{offeringDna.coreProblem}</p></InfoCard>
               <InfoCard title="Capabilities"><List items={offeringDna.capabilities} /></InfoCard>
               <InfoCard title="Differentiators"><List items={offeringDna.differentiators} /></InfoCard>
@@ -213,7 +213,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           {!icp ? (
             <p className="text-sm text-ink-soft">Not generated yet.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <InfoCard title="Industries"><TagList items={icp.industries} /></InfoCard>
               <InfoCard title="Geographies"><TagList items={icp.geographies} /></InfoCard>
               <InfoCard title="Employee range">

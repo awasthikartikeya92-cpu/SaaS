@@ -1,0 +1,143 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  LayoutGrid,
+  Megaphone,
+  Building2,
+  Radio,
+  Users,
+  FileText,
+  Settings,
+  LogOut,
+  Menu,
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const NAV = [
+  { href: "/overview", label: "Overview", icon: LayoutGrid },
+  { href: "/campaigns", label: "Campaigns", icon: Megaphone },
+  { href: "/accounts", label: "Accounts", icon: Building2 },
+  { href: "/signals", label: "Signals", icon: Radio },
+  { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/settings", label: "Settings", icon: Settings },
+];
+
+/**
+ * The dashboard's navigation shell. Below `md`, the 224px sidebar used to
+ * just... stay there -- on a 390px phone it ate more than half the screen,
+ * permanently, on every single dashboard page. There was no mobile
+ * treatment at all.
+ *
+ * Below `md`, this becomes a slide-in drawer (off-canvas by default,
+ * opened by a hamburger button in a mobile-only top bar) instead of a
+ * permanent column; at `md` and up it's the original always-visible
+ * sidebar, unchanged. Client component specifically for the open/close
+ * state -- the auth check and the sign-out server action stay in
+ * layout.tsx (a Server Component), passed in as props/children, so this
+ * file owns only the interaction, not the session.
+ */
+export function DashboardShell({
+  userEmail,
+  onSignOut,
+  children,
+}: {
+  userEmail: string;
+  onSignOut: () => Promise<void>;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    // Lock background scroll and allow Escape to close while the drawer is
+    // open -- it visually covers the page like a modal, so it should
+    // behave like one.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-paper-raised px-4 md:hidden">
+        <span className="font-[var(--font-display)] text-lg">SignalIQ</span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open navigation menu"
+          className="rounded-[var(--radius-sm)] p-2 text-ink-soft hover:bg-paper hover:text-ink"
+        >
+          <Menu className="size-5" />
+        </button>
+      </div>
+
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-ink/40 md:hidden"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col border-r border-line bg-paper-raised transition-transform duration-200",
+          "md:static md:z-auto md:w-56 md:translate-x-0",
+          open ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        <div className="flex h-14 items-center justify-between px-5 md:justify-start">
+          <span className="font-[var(--font-display)] text-lg">SignalIQ</span>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            aria-label="Close navigation menu"
+            className="rounded-[var(--radius-sm)] p-2 text-ink-soft hover:bg-paper hover:text-ink md:hidden"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <nav className="flex flex-1 flex-col gap-0.5 px-3">
+          {NAV.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper hover:text-ink"
+            >
+              <item.icon className="size-4" />
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="border-t border-line p-3">
+          <div className="mb-2 px-3 text-xs text-ink-soft">{userEmail}</div>
+          <form action={onSignOut}>
+            <button
+              type="submit"
+              className="flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper hover:text-ink"
+            >
+              <LogOut className="size-4" />
+              Sign out
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <main className="flex-1 overflow-auto">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 md:px-8 md:py-8">{children}</div>
+      </main>
+    </div>
+  );
+}

@@ -449,6 +449,40 @@ worked through top to bottom.
   firmographic enrichment (employeeCount/geography are still hardcoded
   placeholders in `src/lib/agents/orchestrator.ts`'s account-seeding step).
 
+- **A dashboard that actually works on a phone**
+  (`src/components/dashboard/dashboard-shell.tsx`, new;
+  `src/app/(dashboard)/layout.tsx` now delegates to it). The sidebar used
+  to be a plain fixed-width `<aside>` with no responsive behavior at all --
+  at a 390px viewport it ate more than half the screen, permanently, with
+  no way to dismiss it. Now: below the `md` breakpoint the sidebar is
+  replaced by a slim top bar (wordmark + hamburger button); tapping it
+  slides the same nav in from the left as an overlay drawer with a
+  click-to-dismiss backdrop, Escape-to-close, and `document.body.overflow`
+  locked while open so the page underneath doesn't scroll. At `md` and
+  above it's the original static sidebar, unchanged -- desktop layout,
+  nav order, and the user-email/sign-out footer are all pixel-identical to
+  before. Also fixed two detail-page grids (`campaigns/[id]/page.tsx`'s
+  Offering DNA and ICP tabs, `campaigns/new/page.tsx`'s target
+  industries/geographies fields) that were hardcoded `grid-cols-2` and
+  would compress long labels into unreadably narrow columns below `sm` --
+  now `grid-cols-1 sm:grid-cols-2`.
+  - Verified visually, not just by reading the code: rendered the real
+    component tree (a temporary, unlinked preview route, deleted before
+    this shipped -- this sandbox has no reachable Postgres for the real
+    authenticated layout to hit) and screenshotted desktop, mobile
+    drawer-closed, mobile drawer-open, and post-backdrop-click-close with
+    a real headless browser at a 390px width. Caught and fixed one real
+    bug this way that reading the code alone did not surface: the `"use
+    server"` action is passed through `DashboardShell` as an ordinary
+    prop, which is exactly the shape Next.js rejects at runtime
+    ("Event handlers cannot be passed to Client Component props") if the
+    action isn't a genuine Server Action -- confirmed the real
+    `layout.tsx`/`onSignOut` wiring already does this correctly and the
+    pattern works end-to-end.
+  - Tables (`src/components/ui/table.tsx`) already self-wrap in an
+    `overflow-x-auto` container, so the accounts/signals tables needed no
+    change -- checked, not assumed.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds
