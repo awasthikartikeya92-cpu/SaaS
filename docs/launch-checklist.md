@@ -652,11 +652,15 @@ worked through top to bottom.
     `getEmailProvider()` is now the missing piece item #5 above named for
     real signup abuse prevention (email verification) -- reuse it rather
     than building a second one. Token generation/hashing/validity is unit
-    tested (`src/lib/auth/password-reset.test.ts`); like the retry
-    feature above, the live database behavior (a real reset actually
-    changing the password, a used/expired token actually being rejected
-    end-to-end) isn't verified against a live Postgres instance from this
-    sandbox -- a real forgot-password request is the actual test.
+    tested (`src/lib/auth/password-reset.test.ts`). **Confirmed working
+    end-to-end in production** with `RESEND_API_KEY` set: a real
+    forgot-password request delivers a real email via Resend and the
+    reset link works -- the one thing worth knowing if testing again is
+    that Resend's dashboard only logs an attempt once a send is actually
+    tried, so "no sent emails yet" there most often means the address
+    tested isn't a registered account (the endpoint correctly no-ops,
+    silently, on purpose -- see its own comment on why), not that
+    anything is broken.
 
 ## What's still a manual step
 
