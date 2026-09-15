@@ -45,11 +45,19 @@ individuals at those companies) as part of that.
 Because the Service surfaces public signals and recommended contacts about
 prospect companies, we process some information about individuals who
 haven't signed up for the Service (e.g., a job title we recommend
-targeting, or a public signal mentioning a company). We do not purchase or
-scrape private data about these individuals — see the Contact Agent
-behavior described in the product's README (it recommends a role, not a
-verified person, in the current phase). If you are such an individual and
-want to know what's held about your company or role, contact us at
+targeting, or a public signal mentioning a company). We do not scrape
+private data about these individuals ourselves. Where a contact
+enrichment provider is configured (currently Hunter.io, opt-in via
+`HUNTER_API_KEY` — see `src/lib/contacts/`), the Service purchases access
+to that provider's own database of business contact information
+(professional titles, work email addresses, and public professional
+profile links) to surface a verified, real contact instead of only a
+recommended title; this data reflects information the individual or their
+employer has made publicly available (e.g., on a company website or
+professional profile) and comes to us through the provider's own
+compliance process, not our own direct collection. If you are such an
+individual and want to know what's held about your company or role,
+contact us at
 contact@intrendzmedia.com.
 
 ## 4. How we use information

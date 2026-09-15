@@ -125,14 +125,20 @@ didn't run:
   `generating` forever, and the campaign page shows the actual error
 
 **Intentionally stubbed:**
-- **Research provider is mock data** (`src/lib/research/mock-provider.ts`).
-  A real provider goes behind the same `ResearchProvider` interface
-  (`src/lib/research/provider.ts`) -- nothing above that layer changes. See
-  `docs/launch-checklist.md` for specific provider recommendations.
-- **Contact Agent never returns a verified person**, by design -- there's
-  no person-level enrichment source yet, so it always recommends a job
-  title instead, which is the "never invent a contact" rule from the brief
-  working as intended, not a bug.
+- **Research defaults to mock data, but real providers exist and are one
+  key away from live.** Set `TAVILY_API_KEY` (real web/news search) and/or
+  `SEC_EDGAR_USER_AGENT` (free public-filings search) and they activate
+  automatically -- no separate `RESEARCH_PROVIDER`/`SEC_EDGAR_ENABLED` flag
+  needed anymore, since providing the credential already says what you
+  want. See `src/lib/research/`.
+- **Contact Agent recommends a title by default; a real verified person is
+  available too.** There's still no person-level enrichment *unless*
+  configured -- set `HUNTER_API_KEY` and the pipeline tries Hunter's
+  domain-search for a real, named contact before ever falling back to the
+  LLM's recommended title. The "never invent a contact" rule still holds
+  exactly as before: a verified name only ever comes from that
+  deterministic third-party lookup, never from the LLM. See
+  `src/lib/contacts/`.
 - **PDF/DOCX/CSV export buttons are present but disabled.** Report
   *content* generation works now (`/reports`); file export doesn't yet.
 - **Scoring weights are read-only** in Settings -- the formula already

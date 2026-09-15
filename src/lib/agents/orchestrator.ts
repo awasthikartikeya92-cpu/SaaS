@@ -10,6 +10,7 @@ import {
   accountScores,
   accountSignals,
   contacts,
+  contactSources,
   outreachRecommendations,
   researchRuns,
   researchSources,
@@ -28,6 +29,8 @@ import { setAiUsageSink, withAiUsageContext } from "@/lib/ai/usage-context";
 import { recordAiUsageEvent } from "@/lib/billing/usage-tracking";
 import { getGenerationProgress, type GenerationProgress } from "@/lib/db/queries";
 import { decideStageAction } from "./stage-decision";
+import { getContactEnrichmentProvider, type EnrichedContact } from "@/lib/contacts";
+import { pickBestContact } from "@/lib/contacts/rank";
 
 // Registered once per process. Every AiProvider.complete() call reports
 // through this sink when it runs inside the withAiUsageContext() below.
@@ -483,35 +486,111 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
   );
 }
 
+/**
+ * Real, deterministic verification, tried before ever falling back to the
+ * Contact Agent's LLM-recommended title. Returns null -- never throws out to
+ * the caller -- whenever a verified contact isn't available for any reason:
+ * no provider configured (the normal case until HUNTER_API_KEY is set), no
+ * website on this account, a network/API failure, or no candidate confident
+ * and relevant enough to surface (see rank.ts). Enrichment is additive
+ * infrastructure layered on a pipeline that already works without it -- a
+ * flaky third-party lookup must never turn into an account failure when the
+ * existing safe fallback is right there.
+ */
+async function tryFindVerifiedContact(
+  account: typeof accounts.$inferSelect,
+  personaTitles: string[]
+): Promise<EnrichedContact | null> {
+  const provider = getContactEnrichmentProvider();
+  if (!provider || !account.website) return null;
+
+  const domain = extractDomain(account.website);
+  if (!domain) return null;
+
+  try {
+    const candidates = await provider.findContacts(domain);
+    return pickBestContact(candidates, personaTitles);
+  } catch (err) {
+    console.error(`[contact-enrichment] ${provider.name} lookup failed for ${domain}, falling back to a recommended title:`, err);
+    return null;
+  }
+}
+
+/** account.website may be a bare hostname (how Tavily stores it) or a full URL -- normalize either to a bare hostname. */
+function extractDomain(website: string): string | null {
+  try {
+    const withProtocol = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+    return new URL(withProtocol).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
 async function stepContact(campaign: typeof campaigns.$inferSelect, account: typeof accounts.$inferSelect) {
   try {
     const { offeringDna, icp } = await loadOfferingAndIcp(account.campaignId);
-    const { output: contactOut } = await logRun(
-      account.campaignId,
-      "contact-agent",
-      () => runContactAgent({ companyName: account.companyName, industry: account.industry, offeringDna, icp }),
-      campaign.organizationId
-    );
-    const contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
+    const personaTitles = offeringDna.personas.map((p) => p.title);
 
-    await db.insert(contacts).values({
-      accountId: account.id,
-      name: contact.name,
-      title: contact.title,
-      isVerified: false,
-      confidence: contact.confidence,
-      relevance: contact.relevance,
-    });
+    // Real enrichment first, LLM-recommended title as the fallback -- never
+    // the other way around. A verified person only ever comes from
+    // deterministic third-party data (see src/lib/contacts/rank.ts's own
+    // comment); the LLM is never trusted to decide isVerified or invent a
+    // name itself, matching the same "never invent a contact" rule the
+    // Contact Agent's own prompt already enforces for its fallback path.
+    const enriched = await tryFindVerifiedContact(account, personaTitles);
+
+    let contact: { name: string | null; title: string; isVerified: boolean; confidence: number; relevance: string };
+    let verifiedSourceUrl: string | null = null;
+
+    if (enriched) {
+      contact = {
+        name: enriched.name,
+        title: enriched.title,
+        isVerified: true,
+        confidence: enriched.confidence,
+        relevance: `Verified via Hunter's domain search: a real, named ${enriched.title} at this company -- not a recommendation.`,
+      };
+      verifiedSourceUrl = enriched.linkedinUrl;
+    } else {
+      const { output: contactOut } = await logRun(
+        account.campaignId,
+        "contact-agent",
+        () => runContactAgent({ companyName: account.companyName, industry: account.industry, offeringDna, icp }),
+        campaign.organizationId
+      );
+      contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
+    }
+
+    const [contactRow] = await db
+      .insert(contacts)
+      .values({
+        accountId: account.id,
+        name: contact.name,
+        title: contact.title,
+        isVerified: contact.isVerified,
+        confidence: contact.confidence,
+        relevance: contact.relevance,
+      })
+      .returning();
+
+    if (verifiedSourceUrl) {
+      await db.insert(contactSources).values({ contactId: contactRow.id, url: verifiedSourceUrl });
+    }
 
     const [score] = await db.select().from(accountScores).where(eq(accountScores.accountId, account.id)).limit(1);
     const reachability = computeReachability({
-      decisionMakerIdentified: false,
+      // Was hardcoded false regardless of what actually happened above --
+      // computeReachability has always had a real, higher-weighted formula
+      // for a verified decision maker (see its own comment in
+      // src/lib/scoring/index.ts), it just had no way to ever be true until
+      // real enrichment existed to genuinely verify one.
+      decisionMakerIdentified: contact.isVerified,
       // Was a flat 80 for every account -- computeRoleRelevance uses real
-      // data instead: does the Contact Agent's recommended title actually
-      // match one of the buyer personas the Offering Agent derived from
-      // what the user described, or is it a generic guess unrelated to any
-      // stated persona? See src/lib/scoring/index.ts.
-      roleRelevance: computeRoleRelevance(contact.title, offeringDna.personas.map((p) => p.title)),
+      // data instead: does the contact's title actually match one of the
+      // buyer personas the Offering Agent derived from what the user
+      // described, or is it unrelated to any stated persona? See
+      // src/lib/scoring/index.ts.
+      roleRelevance: computeRoleRelevance(contact.title, personaTitles),
       contactConfidence: contact.confidence,
     });
     const opportunity = computeOpportunityScore(score.icpFit, score.intent, reachability);

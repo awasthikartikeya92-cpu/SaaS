@@ -10,7 +10,17 @@ export function getResearchProvider(): ResearchProvider {
   if (cached) return cached;
   // `||` on purpose, not `??`, and normalized the same way -- see the same
   // comments in src/lib/ai/index.ts.
-  const providerName = (process.env.RESEARCH_PROVIDER || "mock").toLowerCase().trim();
+  //
+  // Previously this fell back to "mock" whenever RESEARCH_PROVIDER was
+  // unset, full stop -- so setting TAVILY_API_KEY alone did nothing; you
+  // also had to separately set RESEARCH_PROVIDER="tavily", a redundant
+  // second step to opt into a real provider you'd already given credentials
+  // for. Now, an unset RESEARCH_PROVIDER infers "tavily" when a key is
+  // present and only falls back to "mock" when neither is given -- an
+  // explicit RESEARCH_PROVIDER still always wins (e.g. to force "mock" for
+  // local dev even with a real key sitting in .env).
+  const explicitProviderName = (process.env.RESEARCH_PROVIDER || "").toLowerCase().trim();
+  const providerName = explicitProviderName || (process.env.TAVILY_API_KEY ? "tavily" : "mock");
 
   let primary: ResearchProvider;
   if (providerName === "mock") {
@@ -32,8 +42,20 @@ export function getResearchProvider(): ResearchProvider {
   // the other. Independent on/off switch since it costs nothing (no API
   // key, no per-request charge) and most target accounts won't be public
   // filers anyway -- see docs/launch-checklist.md.
+  //
+  // Same auto-detect fix as above, same reasoning: SEC_EDGAR_ENABLED used
+  // to require an explicit "true" even when SEC_EDGAR_USER_AGENT was
+  // already set -- providing a descriptive User-Agent is itself a clear
+  // signal of intent to use this (there's no other reason to set it), so
+  // an unset SEC_EDGAR_ENABLED now infers "on" from that. An explicit
+  // "false" still disables it outright even with a User-Agent present, for
+  // anyone who wants the value on file without the feature active.
+  const explicitSecEdgarEnabled = (process.env.SEC_EDGAR_ENABLED || "").toLowerCase().trim();
+  const secEdgarEnabled =
+    explicitSecEdgarEnabled === "true" || (explicitSecEdgarEnabled === "" && Boolean(process.env.SEC_EDGAR_USER_AGENT));
+
   const providers: ResearchProvider[] = [primary];
-  if ((process.env.SEC_EDGAR_ENABLED || "").toLowerCase().trim() === "true") {
+  if (secEdgarEnabled) {
     const userAgent = process.env.SEC_EDGAR_USER_AGENT;
     if (!userAgent) {
       throw new Error(
