@@ -9,8 +9,11 @@
 > launch — this draft does not attempt that on its own. Placeholders are
 > marked `[ ]`.
 
-**Last updated:** [ ]
-**Company:** [ ] ("we", "us")
+**Last updated:** September 15, 2026
+**Company:** Intrendz Media ("we", "us"). SignalIQ is a proprietary product
+of Intrendz Media, currently an unincorporated (sole proprietorship)
+business based in India. [Update once Intrendz Media completes formal
+incorporation.]
 
 ## 1. What this covers
 
@@ -34,7 +37,7 @@ individuals at those companies) as part of that.
   plan/quota enforcement and cost accounting — not for anything beyond
   making the product and billing work correctly.
 - **Payment data:** if you're on a paid plan, our payment processor
-  ([Stripe]) handles your card details directly — we don't store full card
+  (Stripe) handles your card details directly — we don't store full card
   numbers ourselves.
 
 ## 3. Information about people who are not our users
@@ -46,7 +49,8 @@ targeting, or a public signal mentioning a company). We do not purchase or
 scrape private data about these individuals — see the Contact Agent
 behavior described in the product's README (it recommends a role, not a
 verified person, in the current phase). If you are such an individual and
-want to know what's held about your company or role, contact us at [ ].
+want to know what's held about your company or role, contact us at
+contact@intrendzmedia.com.
 
 ## 4. How we use information
 
@@ -67,8 +71,10 @@ publishing this — those terms vary and change.]
 ## 6. Data retention
 
 We retain account and campaign data for as long as your account is active,
-plus [ ] after cancellation, after which it's deleted unless we're
-required to keep it longer by law. You can request deletion at [ ].
+plus 90 days after cancellation, after which it's deleted unless we're
+required to keep it longer by law. [90 days is a placeholder default, not
+a business decision Intrendz Media has made -- adjust freely.] You can
+request deletion at contact@intrendzmedia.com.
 
 ## 7. Security
 
@@ -80,7 +86,7 @@ of transmission or storage is 100% secure.
 
 Depending on where you live, you may have rights to access, correct, export,
 or delete your personal data, or to object to certain processing. Contact
-[ ] to exercise these.
+contact@intrendzmedia.com to exercise these.
 
 ## 9. Changes to this policy
 
@@ -89,4 +95,4 @@ changes.
 
 ## 10. Contact
 
-Questions about this policy: [ ]
+Questions about this policy: contact@intrendzmedia.com

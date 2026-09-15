@@ -7,8 +7,11 @@
 > how you've actually structured the business (entity, country, payment
 > processor). Placeholders are marked `[ ]`.
 
-**Last updated:** [ ]
-**Company:** [ ], a [ ] located at [ ] ("we", "us")
+**Last updated:** September 15, 2026
+**Company:** Intrendz Media, an unincorporated (sole proprietorship) business
+based in India ("we", "us"). SignalIQ is a proprietary product of Intrendz
+Media. [Update this line once Intrendz Media completes formal incorporation
+-- entity type and registered address will change.]
 
 ## 1. What SignalIQ is
 
@@ -20,8 +23,8 @@ these Terms.
 ## 2. Accounts
 
 You're responsible for the accuracy of the information you provide and for
-activity under your account. Notify us promptly at [ ] if you suspect
-unauthorized use.
+activity under your account. Notify us promptly at contact@intrendzmedia.com
+if you suspect unauthorized use.
 
 ## 3. Plans, free tier, and billing
 
@@ -32,14 +35,16 @@ unauthorized use.
   via our payment processor. Prices are shown at checkout.
 - **Changes to the free plan.** We may change what the free plan includes.
   If we reduce free-plan limits or move features behind a paid plan, we'll
-  give existing free-plan users at least [30] days' notice by email before
+  give existing free-plan users at least 30 days' notice by email before
   the change takes effect.
 - **Cancellation.** You can cancel a paid subscription at any time; it
   remains active through the end of the current billing period. [Insert
   refund policy once decided — e.g., no partial refunds for unused time, or
   pro-rated refunds within N days.]
 - **Non-payment.** We may suspend or downgrade access if a payment fails
-  and isn't resolved within [ ] days of notice.
+  and isn't resolved within 7 days of notice. [7 is a placeholder default,
+  not a business decision Intrendz Media has made -- adjust freely, no
+  code depends on this specific number.]
 
 ## 4. AI-generated content
 
@@ -56,8 +61,8 @@ person — before using it in outreach or a business decision.
 Some of what the Service surfaces is information about companies and, in
 some cases, individuals who are not our users (e.g., a recommended job
 title or public signal about a prospect company). We source this from
-[research provider(s), per docs/launch-checklist.md] and from your own
-inputs. You agree to use this information in compliance with applicable
+Tavily (web and news search) and, where enabled for a given account, SEC
+EDGAR (public company filings), plus your own inputs. You agree to use this information in compliance with applicable
 law (including any anti-spam / unsolicited-communication rules like
 CAN-SPAM, CASL, or GDPR-adjacent rules that apply to your outreach) — the
 Service doesn't grant you a legal basis for how you contact anyone it
@@ -92,12 +97,16 @@ access for a violation of these Terms or the Acceptable Use section above.
 ## 10. Changes to these Terms
 
 We'll post updates here and, for material changes, notify active users by
-email at least [ ] days before they take effect.
+email at least 30 days before they take effect.
 
 ## 11. Governing law
 
-[Jurisdiction to be decided based on where the company is formed.]
+These Terms are governed by the laws of India, without regard to its
+conflict-of-law principles. [The specific city/state courts having
+exclusive jurisdiction still need to be added once Intrendz Media
+completes formal incorporation and has a registered office -- that detail
+determines venue and can't be filled in yet.]
 
 ## 12. Contact
 
-Questions about these Terms: [ ]
+Questions about these Terms: contact@intrendzmedia.com

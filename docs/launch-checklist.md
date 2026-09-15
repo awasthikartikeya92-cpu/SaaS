@@ -537,10 +537,28 @@ page loads):
   before flipping this on for existing users — see Terms §3.
 
 ### 4. Legal
-- Have `legal/terms.md` and `legal/privacy.md` reviewed by an attorney and
-  fill in the `[ ]` placeholders -- they're already linked from `/signup`
-  and live at `/terms`/`/privacy`, so no code change is needed once the
-  content is final, just edit the `.md` files.
+- Identity fields are filled in: company is Intrendz Media (currently
+  unincorporated / sole proprietorship, based in India; SignalIQ is its
+  proprietary product), governing law is India, and
+  `contact@intrendzmedia.com` is the single contact address across both
+  documents. The physical mailing address line was deliberately omitted
+  rather than filled with a placeholder or a home address -- add it once
+  there's a permanent registered office.
+- Still open, and these are business/legal decisions, not just filling in
+  facts: the refund policy (Terms §3), the liability clause itself (Terms
+  §8, currently a common shape not a drafted clause), the AI provider's
+  current data-retention/training-use terms to cite (Privacy §5), and
+  confirming database encryption at rest/in transit once the production
+  Postgres host is chosen (Privacy §7). Two numeric defaults were filled
+  in as placeholders, not decisions -- adjust freely: 7 days' grace period
+  before suspending on non-payment (Terms §3), 90 days' data retention
+  after cancellation (Privacy §6).
+- Both documents still need attorney review before a single real user sees
+  them, per the warning at the top of each file -- filling in the
+  placeholders makes them complete drafts, not reviewed legal documents.
+  They're already linked from `/signup` and live at `/terms`/`/privacy`,
+  so no code change is needed once the content is final, just edit the
+  `.md` files.
 
 ### 5. Real abuse prevention on signup
 The IP-based rate limit (`src/lib/auth/rate-limit.ts`) is a speed bump, not
