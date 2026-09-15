@@ -162,7 +162,7 @@ async function mustProgress(campaignId: string, organizationId: string): Promise
 async function logRun(
   campaignId: string,
   agent: string,
-  fn: () => Promise<unknown>,
+  fn: (runId: string) => Promise<unknown>,
   organizationId: string
 ) {
   const [run] = await db
@@ -170,7 +170,7 @@ async function logRun(
     .values({ campaignId, agent, status: "running", input: {} })
     .returning();
   try {
-    const output = await withAiUsageContext({ organizationId, campaignId, agent }, fn);
+    const output = await withAiUsageContext({ organizationId, campaignId, agent }, () => fn(run.id));
     await db
       .update(researchRuns)
       .set({ status: "success", output: output as object, finishedAt: new Date() })
@@ -186,11 +186,25 @@ async function logRun(
 }
 
 async function stepOffering(campaign: typeof campaigns.$inferSelect, campaignId: string) {
-  const { output: dna } = await logRun(
+  // The DB writes below run INSIDE logRun's callback, not after it returns
+  // -- deliberately, after a real production failure showed why: a campaign
+  // failed with the failure card reading "Generation failed at icp-agent"
+  // but NO error text at all, and the "what already completed" summary
+  // claimed "ICP: done". What actually happened: runIcpAgent() succeeded
+  // (logRun marked that run "success" and returned), and the icp_profiles
+  // INSERT *after* it threw -- but that insert wasn't covered by logRun's
+  // own try/catch, so the thrown error skipped straight past it to
+  // runNextStep()'s outer catch, which only knows how to mark the whole
+  // campaign "failed" with no idea which agent or why. Wrapping the
+  // persistence inside the same callback logRun awaits means ANY failure
+  // in this stage -- the LLM call or the write that turns its output into
+  // rows -- lands on this run's `error` column, where the failure card
+  // actually reads it.
+  await logRun(
     campaignId,
     "offering-agent",
-    () =>
-      runOfferingAgent({
+    async () => {
+      const offeringDna = await runOfferingAgent({
         name: campaign.name,
         website: campaign.website ?? undefined,
         problemsSolved: campaign.problemsSolved,
@@ -199,33 +213,35 @@ async function stepOffering(campaign: typeof campaigns.$inferSelect, campaignId:
         competitors: campaign.competitors ?? undefined,
         knownIcp: campaign.knownIcp ?? undefined,
         knownPersonas: campaign.knownPersonas ?? undefined,
-      }),
+      });
+
+      const [offeringRow] = await db
+        .insert(offeringDnaTable)
+        .values({
+          campaignId,
+          coreProblem: offeringDna.coreProblem,
+          capabilities: offeringDna.capabilities,
+          differentiators: offeringDna.differentiators,
+          painPoints: offeringDna.painPoints,
+          buyingTriggers: offeringDna.buyingTriggers,
+          objections: offeringDna.objections,
+          alternatives: offeringDna.alternatives,
+        })
+        .returning();
+
+      for (const persona of offeringDna.personas) {
+        await db.insert(buyerPersonas).values({
+          offeringDnaId: offeringRow.id,
+          title: persona.title,
+          painPoints: persona.painPoints,
+          priorities: persona.priorities,
+        });
+      }
+
+      return offeringDna;
+    },
     campaign.organizationId
   );
-  const offeringDna = dna as OfferingDna;
-
-  const [offeringRow] = await db
-    .insert(offeringDnaTable)
-    .values({
-      campaignId,
-      coreProblem: offeringDna.coreProblem,
-      capabilities: offeringDna.capabilities,
-      differentiators: offeringDna.differentiators,
-      painPoints: offeringDna.painPoints,
-      buyingTriggers: offeringDna.buyingTriggers,
-      objections: offeringDna.objections,
-      alternatives: offeringDna.alternatives,
-    })
-    .returning();
-
-  for (const persona of offeringDna.personas) {
-    await db.insert(buyerPersonas).values({
-      offeringDnaId: offeringRow.id,
-      title: persona.title,
-      painPoints: persona.painPoints,
-      priorities: persona.priorities,
-    });
-  }
 }
 
 async function stepIcp(campaign: typeof campaigns.$inferSelect, campaignId: string) {
@@ -233,56 +249,71 @@ async function stepIcp(campaign: typeof campaigns.$inferSelect, campaignId: stri
   const personaRows = await db.select().from(buyerPersonas).where(eq(buyerPersonas.offeringDnaId, offeringRow.id));
   const offeringDna: OfferingDna = { ...offeringRow, personas: personaRows };
 
-  const { output: icpOut } = await logRun(
+  // See stepOffering's comment -- same reasoning, and this is the stage
+  // that actually surfaced the bug: icp_profiles.revenueMin/revenueMax
+  // used to be `integer` (max ~2.1B), and this product's own ICP is
+  // routinely a large public enterprise (see schema.ts's comment on those
+  // columns) whose revenue in dollars exceeds that easily. The overflow
+  // is fixed at the column level too (now doublePrecision), but this
+  // restructure is what makes the *next* unanticipated insert failure --
+  // whatever it turns out to be -- show up with a real error message
+  // instead of a silent, misleadingly-"successful" icp-agent run.
+  await logRun(
     campaignId,
     "icp-agent",
-    () =>
-      runIcpAgent({
+    async () => {
+      const icp = await runIcpAgent({
         offeringDna,
         targetIndustries: campaign.targetIndustries,
         targetGeographies: campaign.targetGeographies,
         targetCompanySize: campaign.targetCompanySize ?? undefined,
         knownIcp: campaign.knownIcp ?? undefined,
-      }),
+      });
+
+      await db.insert(icpProfiles).values({
+        campaignId,
+        industries: icp.industries,
+        geographies: icp.geographies,
+        employeeMin: icp.employeeMin,
+        employeeMax: icp.employeeMax,
+        revenueMin: icp.revenueMin,
+        revenueMax: icp.revenueMax,
+        businessModel: icp.businessModel,
+        techCharacteristics: icp.techCharacteristics,
+        orgCharacteristics: icp.orgCharacteristics,
+        buyingCommittee: icp.buyingCommittee,
+      });
+
+      return icp;
+    },
     campaign.organizationId
   );
-  const icp = icpOut as IcpProfile;
-
-  await db.insert(icpProfiles).values({
-    campaignId,
-    industries: icp.industries,
-    geographies: icp.geographies,
-    employeeMin: icp.employeeMin,
-    employeeMax: icp.employeeMax,
-    revenueMin: icp.revenueMin,
-    revenueMax: icp.revenueMax,
-    businessModel: icp.businessModel,
-    techCharacteristics: icp.techCharacteristics,
-    orgCharacteristics: icp.orgCharacteristics,
-    buyingCommittee: icp.buyingCommittee,
-  });
 }
 
 async function stepSignal(campaign: typeof campaigns.$inferSelect, campaignId: string) {
   const { offeringDna, icp } = await loadOfferingAndIcp(campaignId);
 
-  const { output: taxonomyOut } = await logRun(
+  // See stepOffering's comment -- same reasoning.
+  await logRun(
     campaignId,
     "signal-agent",
-    () => runSignalAgent(offeringDna, icp),
+    async () => {
+      const taxonomy = await runSignalAgent(offeringDna, icp);
+
+      const [taxonomyRow] = await db.insert(signalTaxonomies).values({ campaignId }).returning();
+      for (const s of taxonomy.signals) {
+        await db.insert(signalDefinitions).values({
+          taxonomyId: taxonomyRow.id,
+          name: s.name,
+          tier: s.tier,
+          description: s.description,
+        });
+      }
+
+      return taxonomy;
+    },
     campaign.organizationId
   );
-  const taxonomy = taxonomyOut as { signals: { name: string; tier: 1 | 2 | 3; description: string }[] };
-
-  const [taxonomyRow] = await db.insert(signalTaxonomies).values({ campaignId }).returning();
-  for (const s of taxonomy.signals) {
-    await db.insert(signalDefinitions).values({
-      taxonomyId: taxonomyRow.id,
-      name: s.name,
-      tier: s.tier,
-      description: s.description,
-    });
-  }
 }
 
 /**
@@ -299,115 +330,126 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
   const signalDefs = await db.select().from(signalDefinitions).where(eq(signalDefinitions.taxonomyId, taxonomyRow.id));
   const taxonomy = { signals: signalDefs.map((s) => ({ name: s.name, tier: s.tier as 1 | 2 | 3, description: s.description })) };
 
-  const { output: rawEvidenceOut, runId: researchRunId } = await logRun(
+  // See stepOffering's comment for why the whole seeding loop -- not just
+  // the research call -- runs inside logRun's callback: this is the
+  // biggest one of the four (an insert per company, per signal, plus a
+  // score row), so it's the stage with the most surface for an
+  // unanticipated write failure to slip past logRun's own error handling
+  // the way the icp_profiles one did.
+  await logRun(
     campaignId,
     "research-agent",
-    () => runResearchAgent(taxonomy, icp),
+    async (researchRunId) => {
+      const rawEvidence = await runResearchAgent(taxonomy, icp);
+      const verified = runVerificationAgent(rawEvidence);
+
+      const byCompany = new Map<string, VerifiedSignal[]>();
+      for (const v of verified) {
+        if (!byCompany.has(v.companyName)) byCompany.set(v.companyName, []);
+        byCompany.get(v.companyName)!.push(v);
+      }
+
+      const companiesToProcess = [...byCompany.entries()]
+        .sort(([, a], [, b]) => b.length - a.length)
+        .slice(0, MAX_ACCOUNTS_PER_CAMPAIGN);
+
+      for (const [companyName, signalsForCompany] of companiesToProcess) {
+        const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
+        const [account] = await db
+          .insert(accounts)
+          .values({
+            campaignId,
+            companyName,
+            website: signalsForCompany[0].companyWebsite ?? null,
+            industry,
+            status: "pending",
+          })
+          .returning();
+
+        // Matched once per signal and reused below for both the persisted
+        // accountSignals row and the intent calculation -- these used to be
+        // two separate lookups (a fuzzy substring match here, an exact-name
+        // match down in computeIntent's input) that almost never agreed,
+        // since sig.signalHint is essentially never byte-identical to a
+        // taxonomy entry's name. That silently made computeIntent treat
+        // nearly every signal as the weakest tier (the `?? 3` fallback),
+        // regardless of what tier the account's own signal list showed the
+        // user.
+        const matchedTaxonomyEntries = signalsForCompany.map((sig) =>
+          taxonomy.signals.find((t) => sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8)))
+        );
+
+        for (const [i, sig] of signalsForCompany.entries()) {
+          const [sourceRow] = await db
+            .insert(researchSources)
+            .values({
+              researchRunId,
+              url: sig.sourceUrl,
+              publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+              excerpt: sig.evidence,
+            })
+            .returning();
+
+          const matchedTaxonomyEntry = matchedTaxonomyEntries[i];
+
+          await db.insert(accountSignals).values({
+            accountId: account.id,
+            signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
+            tier: matchedTaxonomyEntry?.tier ?? 3,
+            strength: sig.confidence * 100,
+            confidence: sig.confidence,
+            detectedAt: new Date(sig.detectedAt),
+            publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+            verified: sig.verified,
+            evidence: sig.evidence,
+            sourceId: sourceRow.id,
+          });
+        }
+
+        const icpFit = computeIcpFit({
+          // `industry` above is always icp.industries[0] -- there's no
+          // firmographic enrichment connected yet to independently verify
+          // which industry an account actually operates in (see
+          // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap
+          // item). The previous `icp.industries.includes(industry) ? 90 :
+          // 45` check was tautological -- industry was assigned FROM that
+          // exact array moments earlier, so it was always true, always 90,
+          // on every single account in every campaign, while looking like
+          // a real per-account comparison. Flattened to the same honest,
+          // clearly-labeled placeholder as the sub-scores below rather
+          // than a check that's always true dressed up as a real one --
+          // until real firmographic data exists to genuinely tell
+          // accounts apart on this dimension.
+          industryMatch: 65,
+          geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
+          sizeMatch: 65,
+          businessModelMatch: 65,
+          techEnvironmentMatch: 60,
+          problemRelevance: 70,
+        });
+        const intent = computeIntent(
+          signalsForCompany.map((s, i) => ({
+            tier: (matchedTaxonomyEntries[i]?.tier ?? 3) as 1 | 2 | 3,
+            confidence: s.confidence,
+            detectedAt: new Date(s.detectedAt),
+          }))
+        );
+
+        // reachability/opportunity are placeholders until stepContact runs
+        // for this account -- both depend on contact.confidence, which
+        // doesn't exist yet. accountScores has no nullable columns for
+        // these (every score shown in the UI is meant to be a real,
+        // explained number, not a guess -- see src/lib/scoring/index.ts),
+        // so 0 stands in; the UI hides the score entirely for a non-"done"
+        // account rather than showing a misleading 0 (see
+        // campaigns/[id]/page.tsx).
+        await db.insert(accountScores).values({ accountId: account.id, icpFit, intent, reachability: 0, opportunity: 0 });
+      }
+
+      return rawEvidence;
+    },
     campaign.organizationId
   );
-  const rawEvidence = rawEvidenceOut as Awaited<ReturnType<typeof runResearchAgent>>;
-
-  const verified = runVerificationAgent(rawEvidence);
-
-  const byCompany = new Map<string, VerifiedSignal[]>();
-  for (const v of verified) {
-    if (!byCompany.has(v.companyName)) byCompany.set(v.companyName, []);
-    byCompany.get(v.companyName)!.push(v);
-  }
-
-  const companiesToProcess = [...byCompany.entries()]
-    .sort(([, a], [, b]) => b.length - a.length)
-    .slice(0, MAX_ACCOUNTS_PER_CAMPAIGN);
-
-  for (const [companyName, signalsForCompany] of companiesToProcess) {
-    const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
-    const [account] = await db
-      .insert(accounts)
-      .values({
-        campaignId,
-        companyName,
-        website: signalsForCompany[0].companyWebsite ?? null,
-        industry,
-        status: "pending",
-      })
-      .returning();
-
-    // Matched once per signal and reused below for both the persisted
-    // accountSignals row and the intent calculation -- these used to be two
-    // separate lookups (a fuzzy substring match here, an exact-name match
-    // down in computeIntent's input) that almost never agreed, since
-    // sig.signalHint is essentially never byte-identical to a taxonomy
-    // entry's name. That silently made computeIntent treat nearly every
-    // signal as the weakest tier (the `?? 3` fallback), regardless of what
-    // tier the account's own signal list showed the user.
-    const matchedTaxonomyEntries = signalsForCompany.map((sig) =>
-      taxonomy.signals.find((t) => sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8)))
-    );
-
-    for (const [i, sig] of signalsForCompany.entries()) {
-      const [sourceRow] = await db
-        .insert(researchSources)
-        .values({
-          researchRunId,
-          url: sig.sourceUrl,
-          publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-          excerpt: sig.evidence,
-        })
-        .returning();
-
-      const matchedTaxonomyEntry = matchedTaxonomyEntries[i];
-
-      await db.insert(accountSignals).values({
-        accountId: account.id,
-        signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
-        tier: matchedTaxonomyEntry?.tier ?? 3,
-        strength: sig.confidence * 100,
-        confidence: sig.confidence,
-        detectedAt: new Date(sig.detectedAt),
-        publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-        verified: sig.verified,
-        evidence: sig.evidence,
-        sourceId: sourceRow.id,
-      });
-    }
-
-    const icpFit = computeIcpFit({
-      // `industry` above is always icp.industries[0] -- there's no
-      // firmographic enrichment connected yet to independently verify
-      // which industry an account actually operates in (see
-      // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap item).
-      // The previous `icp.industries.includes(industry) ? 90 : 45` check
-      // was tautological -- industry was assigned FROM that exact array
-      // moments earlier, so it was always true, always 90, on every single
-      // account in every campaign, while looking like a real per-account
-      // comparison. Flattened to the same honest, clearly-labeled
-      // placeholder as the sub-scores below rather than a check that's
-      // always true dressed up as a real one -- until real firmographic
-      // data exists to genuinely tell accounts apart on this dimension.
-      industryMatch: 65,
-      geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
-      sizeMatch: 65,
-      businessModelMatch: 65,
-      techEnvironmentMatch: 60,
-      problemRelevance: 70,
-    });
-    const intent = computeIntent(
-      signalsForCompany.map((s, i) => ({
-        tier: (matchedTaxonomyEntries[i]?.tier ?? 3) as 1 | 2 | 3,
-        confidence: s.confidence,
-        detectedAt: new Date(s.detectedAt),
-      }))
-    );
-
-    // reachability/opportunity are placeholders until stepContact runs for
-    // this account -- both depend on contact.confidence, which doesn't
-    // exist yet. accountScores has no nullable columns for these (every
-    // score shown in the UI is meant to be a real, explained number, not a
-    // guess -- see src/lib/scoring/index.ts), so 0 stands in; the UI hides
-    // the score entirely for a non-"done" account rather than showing a
-    // misleading 0 (see campaigns/[id]/page.tsx).
-    await db.insert(accountScores).values({ accountId: account.id, icpFit, intent, reachability: 0, opportunity: 0 });
-  }
 }
 
 async function stepContact(campaign: typeof campaigns.$inferSelect, account: typeof accounts.$inferSelect) {

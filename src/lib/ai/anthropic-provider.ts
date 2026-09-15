@@ -31,39 +31,24 @@ export class AnthropicProvider implements AiProvider {
 
   async complete({ system, messages, maxTokens = 4096, model }: AiCompleteOptions): Promise<string> {
     const resolvedModel = model ?? this.model;
-    const response = await this.client.messages.create(
-      {
-        model: resolvedModel,
-        max_tokens: maxTokens,
-        // Every agent's SYSTEM prompt (offering-agent.ts, contact-agent.ts,
-        // etc.) is a fixed string literal -- never built per-call with
-        // interpolated, request-specific data -- so it's always identical
-        // across every call to that agent, for every account, every
-        // campaign, every organization. That makes it always safe to mark
-        // cacheable unconditionally: worst case (a cold cache) this costs
-        // nothing extra, best case (the overwhelmingly common one, given
-        // how often these run) it's close to free on every call after the
-        // first. See src/lib/ai/provider.ts for the equivalent, opt-in
-        // mechanism for per-call message content.
-        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-        messages: messages.map(toAnthropicMessage),
-      },
-      // maxRetries: 0 -- verified against the SDK's own retry logic
-      // (node_modules/@anthropic-ai/sdk/client.js): a connection *timeout*
-      // is retried unconditionally, independent of the normal 4xx/5xx retry
-      // rules, and that retry gets the *same* REQUEST_TIMEOUT_MS budget
-      // again. With maxRetries: 1 that silently turned one slow-but-fine
-      // response into two full timeout windows back to back (~80s wall
-      // clock at the old 40s value) before finally throwing -- this is
-      // exactly what produced a raw "Request timed out." failure on a real
-      // campaign despite a valid, working API key. Since every agent call
-      // already happens inside its own try/catch (logRun) and a single
-      // account's failure doesn't sink the campaign (see orchestrator.ts),
-      // there's no reliability benefit here worth doubling our exposure to
-      // the 60s function budget for -- fail once, fail fast, let the
-      // existing failure handling take it from there.
-      { timeout: REQUEST_TIMEOUT_MS, maxRetries: 0 }
-    );
+    const request: Anthropic.MessageCreateParamsNonStreaming = {
+      model: resolvedModel,
+      max_tokens: maxTokens,
+      // Every agent's SYSTEM prompt (offering-agent.ts, contact-agent.ts,
+      // etc.) is a fixed string literal -- never built per-call with
+      // interpolated, request-specific data -- so it's always identical
+      // across every call to that agent, for every account, every
+      // campaign, every organization. That makes it always safe to mark
+      // cacheable unconditionally: worst case (a cold cache) this costs
+      // nothing extra, best case (the overwhelmingly common one, given
+      // how often these run) it's close to free on every call after the
+      // first. See src/lib/ai/provider.ts for the equivalent, opt-in
+      // mechanism for per-call message content.
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: messages.map(toAnthropicMessage),
+    };
+
+    const response = await this.createWithSelectiveRetry(request);
 
     // Ground-truth token counts from the API response itself -- this is the
     // one thing that's never a guess. See src/lib/billing/pricing-config.ts
@@ -79,6 +64,64 @@ export class AnthropicProvider implements AiProvider {
 
     const textBlock = response.content.find((b) => b.type === "text");
     return textBlock && "text" in textBlock ? textBlock.text : "";
+  }
+
+  /**
+   * maxRetries: 0 on the SDK call below -- verified against the SDK's own
+   * retry logic (node_modules/@anthropic-ai/sdk/client.js): a connection
+   * *timeout* is retried unconditionally, independent of the normal 4xx/5xx
+   * retry rules, and that retry gets the *same* REQUEST_TIMEOUT_MS budget
+   * again. With maxRetries: 1 that silently turned one slow-but-fine
+   * response into two full timeout windows back to back (~80s wall clock at
+   * the old 40s value) before finally throwing -- this is exactly what
+   * produced a raw "Request timed out." failure on a real campaign despite
+   * a valid, working API key.
+   *
+   * But maxRetries is a single knob covering BOTH that timeout-retry path
+   * AND the SDK's ordinary retry for 429 (rate limit) and 5xx (including
+   * Anthropic's well-documented "529 overloaded" response, a routine,
+   * expected condition under real API load, not a bug on our end) --
+   * turning it off to fix the first case silently also removed the second,
+   * leaving zero resilience against exactly the transient errors the SDK
+   * exists to retry through. That's what was actually causing campaigns to
+   * fail intermittently at whichever agent happened to be running when
+   * Anthropic returned one: with every agent call one-and-done, the odds of
+   * *some* call in a ~20-30-call campaign (offering/icp/signal + Contact/GTM
+   * per account) hitting a 429/529 were high, and each one killed a shared
+   * stage's whole campaign or one account outright.
+   *
+   * The fix implemented here is narrower than flipping maxRetries back on:
+   * retry exactly once, and only for RateLimitError/InternalServerError --
+   * both come back FAST, with a real HTTP response (not a hang), so
+   * retrying costs one short round trip, not a second full
+   * REQUEST_TIMEOUT_MS window. A connection timeout (thrown as
+   * APIConnectionTimeoutError) is deliberately left unretried, preserving
+   * the original fix above.
+   */
+  private async createWithSelectiveRetry(
+    request: Anthropic.MessageCreateParamsNonStreaming
+  ): Promise<Anthropic.Message> {
+    try {
+      return await this.client.messages.create(request, { timeout: REQUEST_TIMEOUT_MS, maxRetries: 0 });
+    } catch (err) {
+      if (!(err instanceof Anthropic.RateLimitError) && !(err instanceof Anthropic.InternalServerError)) {
+        throw err;
+      }
+      // Anthropic sends `retry-after` (seconds) on a 429; honor it, but cap
+      // it so a generous value can't itself blow the calling route's
+      // maxDuration budget (see step/route.ts) -- 3s is short enough that,
+      // combined with a fast-failing first attempt and a full-length retry,
+      // total wall clock stays comfortably inside that budget.
+      // `Headers.get()` returns null (not undefined) when the header is
+      // absent, and `Number(null) === 0` -- checking that before Number()
+      // matters here, or a missing header would silently become "retry
+      // instantly" instead of falling through to the 1500ms default below.
+      const retryAfterHeader = err.headers?.get("retry-after");
+      const retryAfterSeconds = retryAfterHeader != null ? Number(retryAfterHeader) : NaN;
+      const delayMs = Number.isFinite(retryAfterSeconds) ? Math.min(retryAfterSeconds * 1000, 3000) : 1500;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return await this.client.messages.create(request, { timeout: REQUEST_TIMEOUT_MS, maxRetries: 0 });
+    }
   }
 }
 

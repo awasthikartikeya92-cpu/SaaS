@@ -123,8 +123,18 @@ export const icpProfiles = pgTable("icp_profiles", {
   geographies: jsonb("geographies").$type<string[]>().notNull(),
   employeeMin: integer("employee_min"),
   employeeMax: integer("employee_max"),
-  revenueMin: integer("revenue_min"),
-  revenueMax: integer("revenue_max"),
+  // doublePrecision, not integer: revenue is in raw dollars, and the ICP
+  // Agent routinely targets large public enterprises (this product's own
+  // GTM strategy -- an SMB vendor's ICP is often a company that files a
+  // 10-K, see docs/launch-checklist.md's SEC EDGAR section) whose revenue
+  // in dollars regularly exceeds Postgres's 32-bit `integer` ceiling
+  // (2,147,483,647 -- about $2.1B). A `revenueMax` of, say, $50B for a
+  // Fortune 500 ICP overflowed that column and threw "value out of range
+  // for type integer" on insert -- see the stepIcp() fix in orchestrator.ts
+  // for why that specific failure showed up in the UI as "Generation
+  // failed at icp-agent" with no error text at all.
+  revenueMin: doublePrecision("revenue_min"),
+  revenueMax: doublePrecision("revenue_max"),
   businessModel: text("business_model"),
   techCharacteristics: jsonb("tech_characteristics").$type<string[]>().notNull(),
   orgCharacteristics: jsonb("org_characteristics").$type<string[]>().notNull(),

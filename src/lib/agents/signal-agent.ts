@@ -17,6 +17,10 @@ export async function runSignalAgent(offeringDna: OfferingDna, icp: IcpProfile):
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify({ offeringDna, icp }, null, 2) }],
     model: getModelForAgent("signal-agent"),
+    // Same reasoning as offering-agent.ts's maxTokens override: 8-14
+    // signals with a name/tier/description each can add up, and a
+    // truncated response fails parseJson the same way a malformed one does.
+    maxTokens: 8192,
   });
   return parseJson(raw, SignalTaxonomySchema);
 }

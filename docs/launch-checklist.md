@@ -483,6 +483,76 @@ worked through top to bottom.
     `overflow-x-auto` container, so the accounts/signals tables needed no
     change -- checked, not assumed.
 
+- **Fixed: campaigns failing repeatedly, at different agents, with no error
+  text shown.** Full RCA before any code changed -- two distinct, real bugs,
+  both fixed:
+  - **Silent failure attribution** (`src/lib/agents/orchestrator.ts`): each
+    shared stage (offering/ICP/signal/research) called its LLM agent inside
+    `logRun()` (which records success/error on that stage's `research_runs`
+    row) but then persisted the result to the database in a separate step
+    *after* `logRun` had already returned and marked that row "success". If
+    that persistence step itself threw, the error skipped straight past
+    `logRun`'s own error handling to `runNextStep()`'s outer catch, which
+    only knows how to mark the whole campaign "failed" -- with no idea
+    which stage or why. Symptom, reproduced exactly from a real failed
+    campaign's screenshot: the failure card read "Generation failed at
+    icp-agent" with **no error text at all**, while the same page's "what
+    already completed" summary claimed "ICP: done" -- both true from the
+    data's point of view (the icp-agent *run* had succeeded; the *insert*
+    after it hadn't), just impossible to diagnose from the UI. Fixed by
+    moving each stage's persistence inside the same callback `logRun`
+    awaits, so any failure -- the LLM call or the write that turns its
+    output into rows -- lands on that run's `error` column where the
+    failure card actually reads it.
+  - **The concrete trigger for the icp-agent case specifically**:
+    `icp_profiles.revenue_min`/`revenue_max` were Postgres `integer`
+    columns (max ~2.147B). This product's own ICP is routinely a large
+    public enterprise (an SMB vendor's target account, not the vendor
+    itself -- see the SEC EDGAR section above), and a revenue figure in
+    raw dollars for one of those regularly exceeds that ceiling --
+    inserting a `revenueMax` of, say, $50B threw "value out of range for
+    type integer". Fixed by widening both columns to `doublePrecision`
+    (migration `drizzle/0004_thin_jack_flag.sql`); the actual production
+    schema is applied via `drizzle-kit push --force` in `vercel-build`
+    (see item #0 below), not this migration file, but it's generated and
+    committed for the historical record like the others.
+  - **A second, coexisting reliability gap found during the same RCA**
+    (`src/lib/ai/anthropic-provider.ts`): `maxRetries: 0` was set earlier
+    to stop a connection *timeout* from being retried unconditionally by
+    the Anthropic SDK (verified against the SDK's own retry logic in
+    `node_modules/@anthropic-ai/sdk/client.js` -- that retry reuses the
+    same timeout budget, which is what turned one slow-but-fine response
+    into two ~40s timeout windows back to back). But `maxRetries` is one
+    knob covering that retry path *and* the SDK's separate retry for 429
+    (rate limit) and 5xx (including Anthropic's documented "529
+    overloaded" response -- a routine, expected condition under real API
+    load, not a bug on our end) -- turning it off for the first case
+    silently removed resilience against the second too. With every agent
+    call one-and-done, a campaign making 20-30 of them (offering/ICP/
+    signal + Contact/GTM per account) had real odds of *some* call hitting
+    a transient 429/529, killing whichever stage or account it landed on
+    -- consistent with campaigns failing "at some agent or another" rather
+    than one consistent point. Fixed with a narrower, selective retry
+    (`createWithSelectiveRetry`): retry exactly once, only for
+    `RateLimitError`/`InternalServerError` (both return fast, with a real
+    HTTP response -- retrying costs one short round trip, not a second
+    full timeout window), honoring `retry-after` when present but capped
+    at 3s so it can't itself blow the route's time budget; a connection
+    timeout is still never retried, preserving the original fix. The
+    step route's `maxDuration` was raised 45s -> 58s (just under Hobby's
+    60s hard ceiling) to give this one retry room without claiming more of
+    the platform ceiling than the realistic worst case needs.
+  - Verified with real mocked-`fetch` request/response round trips, not
+    just by reading the code (`src/lib/ai/anthropic-provider.test.ts`,
+    new): a 429 with a `retry-after` header retries once and succeeds; a
+    5xx with no header retries once (honoring the real ~1.5s default
+    delay, not a shortcut) and succeeds; a 400 never retries; two
+    consecutive 429s fail after exactly one retry, not indefinitely.
+  - Not verified against a live Anthropic key or Postgres instance (same
+    sandbox restriction noted everywhere else in this document) -- the
+    next real campaign run, especially one with a large-enterprise ICP, is
+    the actual end-to-end confirmation.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds

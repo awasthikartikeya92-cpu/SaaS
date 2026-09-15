@@ -13,11 +13,15 @@ import { track } from "@/lib/analytics/track";
 // platform timeout to interrupt mid-pipeline. See
 // src/lib/agents/orchestrator.ts and docs/launch-checklist.md.
 //
-// 45s, not 60s: comfortably above the Anthropic provider's own 40s
-// per-request timeout (src/lib/ai/anthropic-provider.ts) plus DB round
-// trips, but there's no reason to claim the platform's full ceiling for a
-// single step that should never need it.
-export const maxDuration = 45;
+// 58s, just under Hobby's 60s hard ceiling (raised from an earlier 45s):
+// AnthropicProvider now retries once, but only on a fast-failing 429/5xx
+// (see its createWithSelectiveRetry, and the comment there on why a
+// connection timeout is still never retried) -- worst realistic case is a
+// quick failed first attempt (~1-2s) + a capped ~3s backoff + a full second
+// REQUEST_TIMEOUT_MS-bounded attempt (40s), around 45s total. 45s exactly
+// left no margin for that plus DB round trips, so this claims nearly the
+// full platform ceiling rather than a little above the single-attempt case.
+export const maxDuration = 58;
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();

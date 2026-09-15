@@ -34,6 +34,11 @@ export async function runIcpAgent(input: IcpAgentInput): Promise<IcpProfile> {
     system: SYSTEM,
     messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
     model: getModelForAgent("icp-agent"),
+    // Same reasoning as offering-agent.ts's maxTokens override: the default
+    // 4096 risks truncating mid-JSON on a detailed ICP (long characteristic
+    // lists, a large buying committee), and a truncated response fails
+    // parseJson the same way a malformed one does.
+    maxTokens: 8192,
   });
   return parseJson(raw, IcpProfileSchema);
 }
