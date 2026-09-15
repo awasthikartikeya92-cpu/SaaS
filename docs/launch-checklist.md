@@ -608,6 +608,56 @@ worked through top to bottom.
     stage-decision.ts's own comment on why that logic was pulled out
     separately). A real failed-then-retried campaign is the actual test.
 
+- **Three known limitations resolved: research provider friction, real
+  contact enrichment, and a working password reset flow.**
+  - **Research auto-detection** (`src/lib/research/index.ts`): setting
+    `TAVILY_API_KEY` (or `SEC_EDGAR_USER_AGENT`) alone now activates the
+    real provider -- previously `RESEARCH_PROVIDER`/`SEC_EDGAR_ENABLED`
+    had to be flipped separately too, a redundant second step to opt into
+    a provider you'd already given credentials for. An explicit value
+    either way still wins (e.g. forcing `RESEARCH_PROVIDER="mock"` for
+    local dev even with a real key in `.env`). Tested
+    (`src/lib/research/index.test.ts`) against every inference and
+    override case.
+  - **Real contact enrichment via Hunter.io** (`src/lib/contacts/`, new):
+    a genuinely separate, deterministic path (`tryFindVerifiedContact` in
+    orchestrator.ts) tried before the Contact Agent's LLM call, not
+    instead of the "never invent a contact" rule -- a verified name only
+    ever comes from Hunter's own domain-search data, never from trusting
+    the model. Set `HUNTER_API_KEY` to turn it on; unconfigured, the
+    existing recommended-title fallback runs completely unchanged. Two
+    follow-on fixes this exposed: `computeReachability`'s
+    `decisionMakerIdentified` flag was hardcoded `false` unconditionally
+    (the formula has always had a real, higher-weighted path for a
+    verified contact, it just had no way to ever be true until now), and
+    `contact_sources` -- a table that already existed in the schema -- is
+    now actually written to. `legal/privacy.md` §3 updated to describe
+    this accurately: it previously stated outright that this product
+    doesn't purchase data about non-users, true before this feature,
+    false the moment the key is set. Like Tavily/SEC EDGAR, written from
+    documented API knowledge (api.hunter.io is blocked by this sandbox);
+    the ranking logic itself (`src/lib/contacts/rank.ts`) is unit-tested.
+  - **Password reset** (`/forgot-password`, `/reset-password`,
+    `src/lib/auth/password-reset.ts`, `src/lib/email/`, new): a complete,
+    real flow -- single-use tokens (256-bit random, SHA-256-hashed at
+    rest, 1-hour expiry), rate-limited by IP the same way signup is
+    (`password_reset_attempts`, a separate table so the two limits can't
+    interact), and enumeration-safe (the forgot-password endpoint always
+    returns the same response whether or not the email exists). Email
+    delivery goes through a new provider abstraction
+    (`src/lib/email/provider.ts`, mirroring Research/Contact's shape):
+    defaults to logging the email to server logs (real for local
+    dev/testing, not a working delivery mechanism for a real user) and
+    sends for real once `RESEND_API_KEY` is set. This same
+    `getEmailProvider()` is now the missing piece item #5 above named for
+    real signup abuse prevention (email verification) -- reuse it rather
+    than building a second one. Token generation/hashing/validity is unit
+    tested (`src/lib/auth/password-reset.test.ts`); like the retry
+    feature above, the live database behavior (a real reset actually
+    changing the password, a used/expired token actually being rejected
+    end-to-end) isn't verified against a live Postgres instance from this
+    sandbox -- a real forgot-password request is the actual test.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds
@@ -691,16 +741,15 @@ a real defense -- it stops a script hitting `/api/auth/register` in a tight
 loop, not someone deliberately rotating IPs to keep creating free orgs and
 bypassing the campaign quota. If free-tier abuse shows up in the usage
 data from #2, the real fix is one of: require email verification before a
-new org can generate a campaign (needs an email-sending provider -- Resend
-is the simplest to wire up), or add a CAPTCHA (e.g. Cloudflare Turnstile)
-to the signup form.
+new org can generate a campaign (needs an email-sending provider --
+`src/lib/email/` now has exactly that, built for password reset below; set
+`RESEND_API_KEY` and reuse `getEmailProvider()` rather than building a
+second one), or add a CAPTCHA (e.g. Cloudflare Turnstile) to the signup
+form.
 
 ### 6. Optional, not yet scaffolded
 - Error monitoring (e.g. Sentry) — not wired up in this pass; worth adding
   before real users hit production.
-- Password reset / "forgot password" -- there's no self-serve flow yet;
-  handle it manually (reset via `db:seed`-style script, or a direct DB
-  update) until this exists.
 
 Real research providers (Tavily, SEC EDGAR) are built now -- see the
 "Already built in this pass" sections above; USASpending.gov/SAM.gov and

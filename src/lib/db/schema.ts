@@ -383,6 +383,53 @@ export const signupAttempts = pgTable(
   ]
 );
 
+// Same crude, IP-based throttle as signupAttempts above, applied to
+// forgot-password requests specifically (src/lib/auth/rate-limit.ts) -- a
+// separate table rather than a shared/generic one so this limit can never
+// accidentally interact with the signup limit's count, and so each stays
+// simple to reason about on its own. A forgot-password endpoint is a
+// natural target for both volumetric abuse (mass-triggering reset emails)
+// and user-enumeration probing, on top of the reasons signup needs one.
+export const passwordResetAttempts = pgTable(
+  "password_reset_attempts",
+  {
+    id: id(),
+    ipAddress: text("ip_address").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [index("password_reset_attempts_ip_address_created_at_idx").on(table.ipAddress, table.createdAt)]
+);
+
+// One row per issued reset link. Only `tokenHash` is ever stored -- never
+// the raw token -- so a compromised database doesn't hand over usable reset
+// links, the same principle as storing a bcrypt hash instead of a plaintext
+// password (though this uses a plain SHA-256 hash, not bcrypt: the input
+// here is already a 256-bit random value, not a low-entropy user-chosen
+// password, so there's nothing for bcrypt's deliberate slowness to defend
+// against -- see src/lib/auth/password-reset.ts). `usedAt` enforces
+// single-use; `expiresAt` bounds how long a link stays valid regardless.
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { mode: "date" }).notNull(),
+    usedAt: timestamp("used_at", { mode: "date" }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    // Serves the reset endpoint's "look up by this token's hash" query --
+    // the hottest, and only, lookup this table serves on that path.
+    index("password_reset_tokens_token_hash_idx").on(table.tokenHash),
+    // Serves invalidateOutstandingTokens()'s "every other token for this
+    // user" query, run once a reset actually succeeds.
+    index("password_reset_tokens_user_id_idx").on(table.userId),
+  ]
+);
+
 // Per-LLM-call usage log, written by src/lib/billing/usage-tracking.ts (via
 // the AsyncLocalStorage context in src/lib/ai/usage-context.ts) every time an
 // AI provider call returns. This is the raw data behind unit-economics

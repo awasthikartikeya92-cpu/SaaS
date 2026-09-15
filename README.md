@@ -110,7 +110,10 @@ didn't run:
   redirecting straight to `/login`.
 - Auth (NextAuth, credentials + bcrypt), self-serve signup (`/signup`,
   rate-limited by IP -- see `docs/launch-checklist.md` on why that's a
-  deterrent, not real abuse prevention), campaign creation, full DB schema
+  deterrent, not real abuse prevention), a real password reset flow
+  (`/forgot-password`, `/reset-password` -- single-use, 1-hour-expiring
+  tokens, rate-limited the same way signup is; see `src/lib/auth/password-reset.ts`),
+  campaign creation, full DB schema
 - Offering / ICP / Signal / Contact / GTM agents -- call Anthropic for real
   once you add a key, each on its own model tier, with Zod-validated
   structured output
@@ -145,7 +148,12 @@ didn't run:
   reads from a config object (`src/lib/scoring/index.ts`), not inline
   literals, so making them configurable later is a settings change, not a
   refactor.
-- **No password reset flow.**
+- **Password reset emails need a real provider to actually reach anyone.**
+  The flow itself is complete and works end-to-end; without
+  `RESEND_API_KEY` set, "sending" a reset email just logs it to the
+  server's own logs instead of delivering it (`src/lib/email/`) -- real
+  for local dev/testing a fresh signup's password reset yourself, not a
+  working delivery mechanism for a real user until that key is set.
 
 **Billing/growth infrastructure:**
 - **AI usage instrumentation** -- every Anthropic call is logged (exact
@@ -208,11 +216,13 @@ item 0 for why it shouldn't stay wired into every deploy long-term.
 
 ```
 src/lib/ai/          -- provider interface + per-agent model selection (Anthropic default, OpenAI stub)
-src/lib/research/    -- Research provider interface (mock now, real provider TBD)
+src/lib/research/    -- Research provider interface (mock by default; real Tavily/SEC EDGAR auto-detected from credentials)
+src/lib/contacts/    -- Contact enrichment provider interface (Hunter.io, opt-in via HUNTER_API_KEY)
+src/lib/email/        -- Email provider interface (console log by default; real delivery via Resend)
 src/lib/agents/      -- one file per agent + orchestrator.ts
 src/lib/scoring/      -- deterministic scoring engine
 src/lib/billing/       -- plans, quota enforcement, usage tracking, Stripe, pricing config
-src/lib/auth/           -- signup rate limiting
+src/lib/auth/           -- signup + password-reset rate limiting, password-reset token logic
 src/lib/analytics/       -- product analytics seam
 src/lib/db/               -- Drizzle schema, client, query helpers
 legal/                      -- Terms/Privacy source, rendered at /terms and /privacy
@@ -242,11 +252,19 @@ this was built in, same restriction noted throughout this codebase):
   `orchestrator.ts` specifically so it's testable without a live DB
   connection; this is what prevents two overlapping step calls from both
   trying to create the same campaign's offering/ICP/signal-taxonomy row.
+- `src/lib/ai/anthropic-provider.ts` -- the selective-retry logic (retries
+  a fast-failing 429/5xx once, never a connection timeout) against real
+  mocked HTTP request/response round trips.
+- `src/lib/research/index.ts` -- the provider auto-detection logic (infers
+  a real provider from credentials alone, an explicit env var still wins).
+- `src/lib/contacts/rank.ts` -- which real enrichment candidate, if any, is
+  confident and relevant enough to surface as a verified contact.
+- `src/lib/auth/password-reset.ts` -- token generation/hashing/validity.
 
 ## Verified
 
 - `npm run build` -- clean, no TypeScript errors, no warnings
-- `npm test` -- 38 tests passing across the four files above
+- `npm test` -- 66 tests passing across the files above and more
 - Full login -> dashboard -> campaign -> account-detail flow smoke-tested
   against seeded data with a production server, every page returns 200 with
   real content (not an error page)
