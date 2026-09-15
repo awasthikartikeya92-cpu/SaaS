@@ -619,24 +619,61 @@ worked through top to bottom.
     local dev even with a real key in `.env`). Tested
     (`src/lib/research/index.test.ts`) against every inference and
     override case.
-  - **Real contact enrichment via Hunter.io** (`src/lib/contacts/`, new):
-    a genuinely separate, deterministic path (`tryFindVerifiedContact` in
-    orchestrator.ts) tried before the Contact Agent's LLM call, not
-    instead of the "never invent a contact" rule -- a verified name only
-    ever comes from Hunter's own domain-search data, never from trusting
-    the model. Set `HUNTER_API_KEY` to turn it on; unconfigured, the
-    existing recommended-title fallback runs completely unchanged. Two
-    follow-on fixes this exposed: `computeReachability`'s
-    `decisionMakerIdentified` flag was hardcoded `false` unconditionally
-    (the formula has always had a real, higher-weighted path for a
-    verified contact, it just had no way to ever be true until now), and
-    `contact_sources` -- a table that already existed in the schema -- is
-    now actually written to. `legal/privacy.md` §3 updated to describe
-    this accurately: it previously stated outright that this product
-    doesn't purchase data about non-users, true before this feature,
-    false the moment the key is set. Like Tavily/SEC EDGAR, written from
-    documented API knowledge (api.hunter.io is blocked by this sandbox);
-    the ranking logic itself (`src/lib/contacts/rank.ts`) is unit-tested.
+  - **Real contact enrichment, from up to three composable sources**
+    (`src/lib/contacts/`, new): a genuinely separate, deterministic path
+    (`tryFindVerifiedContact` in orchestrator.ts) tried before the Contact
+    Agent's LLM call, not instead of the "never invent a contact" rule --
+    a verified name only ever comes from one of these sources' own data,
+    never from trusting the model. Unconfigured, the existing
+    recommended-title fallback runs completely unchanged.
+    - **Hunter.io** (commercial, free tier today) -- domain search.
+    - **Google Custom Search** (free tier, 100 queries/day) -- the classic
+      OSINT technique: `site:linkedin.com/in "{company}"`, reading Google's
+      own public result snippets rather than scraping LinkedIn directly.
+      Parsing is deterministic regex, not another LLM call
+      (`parseLinkedInResultTitle`, unit-tested) -- LinkedIn's own
+      result-title format is the one real unknown here (documented common
+      shapes handled, anything else correctly skipped rather than guessed).
+    - **The company's own Team/About page** (fully free, no signup, no
+      key) -- the most genuinely "OSINT" of the three: fetches the
+      account's own website, finds a team-like page (link-scoring
+      heuristic, unit-tested) or falls back to the homepage, and asks a
+      cheap model to extract only name+title pairs actually written in
+      that text -- grounded extraction, not generation. Off by default
+      (`CONTACT_TEAM_PAGE_ENABLED`) since, unlike the other two, it makes
+      a real fetch + LLM call per account rather than one API call.
+    - All three compose (`CompositeContactEnrichmentProvider`, same
+      allSettled resilience pattern as Research's) -- what one misses,
+      another can still catch. Since the slowest one (team-page: multiple
+      fetches plus an LLM call) could otherwise threaten the calling
+      route's time budget, the whole enrichment attempt now races against
+      a 20s timeout in `tryFindVerifiedContact` and falls through to the
+      LLM-recommended-title path if it doesn't resolve in time.
+    - **Gate Hunter (and any future commercial source, e.g. Apollo) to a
+      paid SignalIQ plan once billing launches** -- explicitly the user's
+      own plan, not built yet since no plan is priced and no
+      feature-gating-by-plan pattern exists anywhere in this codebase yet
+      (only the campaign-count quota does). The natural place for it:
+      `src/lib/contacts/index.ts`'s factory would need the calling
+      organization's plan (currently it's a pure, org-agnostic factory),
+      and `src/lib/billing/plans.ts` would need a feature flag per plan,
+      not just a campaign cap. The two free sources need no such gating.
+    - Two follow-on fixes the original Hunter integration exposed:
+      `computeReachability`'s `decisionMakerIdentified` flag was hardcoded
+      `false` unconditionally (the formula has always had a real,
+      higher-weighted path for a verified contact, it just had no way to
+      ever be true until now), and `contact_sources` -- a table that
+      already existed in the schema -- is now actually written to.
+      `legal/privacy.md` §3 updated to describe this accurately: it
+      previously stated outright that this product doesn't purchase data
+      about non-users, true before Hunter, false the moment that key is
+      set (the two free sources don't purchase anything -- one reads the
+      company's own site, the other reads a search engine's public index
+      -- so that section's accuracy only turns on whether Hunter is
+      configured). Like Tavily/SEC EDGAR, both Hunter and Google Search
+      are written from documented API knowledge (api.hunter.io and
+      googleapis.com are both blocked by this sandbox); all the ranking
+      and parsing logic across all three sources is unit-tested.
   - **Password reset** (`/forgot-password`, `/reset-password`,
     `src/lib/auth/password-reset.ts`, `src/lib/email/`, new): a complete,
     real flow -- single-use tokens (256-bit random, SHA-256-hashed at

@@ -33,6 +33,10 @@ const AGENT_MODELS: Record<string, string> = {
   "signal-agent": STRONG_MODEL,
   "gtm-agent": STRONG_MODEL,
   "contact-agent": FAST_MODEL,
+  // src/lib/contacts/team-page-provider.ts -- extracting name/title pairs
+  // that are already written on a page, not generating anything, so the
+  // same cost/quality trade as contact-agent applies here too.
+  "contact-page-extraction": FAST_MODEL,
 };
 
 export function getModelForAgent(agent: keyof typeof AGENT_MODELS): string {

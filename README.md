@@ -134,13 +134,16 @@ didn't run:
   automatically -- no separate `RESEARCH_PROVIDER`/`SEC_EDGAR_ENABLED` flag
   needed anymore, since providing the credential already says what you
   want. See `src/lib/research/`.
-- **Contact Agent recommends a title by default; a real verified person is
-  available too.** There's still no person-level enrichment *unless*
-  configured -- set `HUNTER_API_KEY` and the pipeline tries Hunter's
-  domain-search for a real, named contact before ever falling back to the
-  LLM's recommended title. The "never invent a contact" rule still holds
-  exactly as before: a verified name only ever comes from that
-  deterministic third-party lookup, never from the LLM. See
+- **Contact Agent recommends a title by default; real verified people are
+  available too, from up to three composable sources.** There's still no
+  person-level enrichment *unless* configured: a free company-team-page
+  scrape (`CONTACT_TEAM_PAGE_ENABLED`), a free-tier Google-search-snippet
+  OSINT lookup (`GOOGLE_SEARCH_API_KEY`/`GOOGLE_SEARCH_CX`), and Hunter's
+  commercial domain search (`HUNTER_API_KEY`) all compose -- what one
+  misses another can catch -- and are all tried before ever falling back
+  to the LLM's recommended title. The "never invent a contact" rule holds
+  exactly as before across all three: a verified name only ever comes from
+  one of these deterministic lookups, never from the LLM. See
   `src/lib/contacts/`.
 - **PDF/DOCX/CSV export buttons are present but disabled.** Report
   *content* generation works now (`/reports`); file export doesn't yet.
@@ -217,7 +220,7 @@ item 0 for why it shouldn't stay wired into every deploy long-term.
 ```
 src/lib/ai/          -- provider interface + per-agent model selection (Anthropic default, OpenAI stub)
 src/lib/research/    -- Research provider interface (mock by default; real Tavily/SEC EDGAR auto-detected from credentials)
-src/lib/contacts/    -- Contact enrichment provider interface (Hunter.io, opt-in via HUNTER_API_KEY)
+src/lib/contacts/    -- Contact enrichment: team-page scrape (free), Google-search OSINT (free tier), Hunter.io (commercial) -- all opt-in, composable
 src/lib/email/        -- Email provider interface (console log by default; real delivery via Resend)
 src/lib/agents/      -- one file per agent + orchestrator.ts
 src/lib/scoring/      -- deterministic scoring engine
@@ -259,12 +262,18 @@ this was built in, same restriction noted throughout this codebase):
   a real provider from credentials alone, an explicit env var still wins).
 - `src/lib/contacts/rank.ts` -- which real enrichment candidate, if any, is
   confident and relevant enough to surface as a verified contact.
+- `src/lib/contacts/team-page-provider.ts` -- the team-page link-scoring
+  heuristic and readable-text extraction (script/style/nav/footer
+  stripped, whitespace collapsed, long pages truncated).
+- `src/lib/contacts/google-search-provider.ts` -- parsing LinkedIn's own
+  search-result title format into name+title, including the cases it
+  correctly declines to guess at (no title segment present).
 - `src/lib/auth/password-reset.ts` -- token generation/hashing/validity.
 
 ## Verified
 
 - `npm run build` -- clean, no TypeScript errors, no warnings
-- `npm test` -- 66 tests passing across the files above and more
+- `npm test` -- 81 tests passing across the files above and more
 - Full login -> dashboard -> campaign -> account-detail flow smoke-tested
   against seeded data with a production server, every page returns 200 with
   real content (not an error page)

@@ -486,15 +486,28 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
   );
 }
 
+// Bounds the whole enrichment attempt below, not any one provider's own
+// internal timeout -- with TeamPageProvider composed in (real page fetches
+// plus an LLM call), the slowest configured provider could otherwise run
+// long enough to meaningfully threaten the calling route's overall time
+// budget (see step/route.ts's own comment on that budget). Racing against
+// this doesn't cancel the slower providers -- their requests keep running
+// in the background and complete or fail on their own -- it just means
+// this function stops waiting and falls through to the existing
+// LLM-recommended-title path, the same safe outcome as any other
+// enrichment failure.
+const ENRICHMENT_TIMEOUT_MS = 20_000;
+
 /**
  * Real, deterministic verification, tried before ever falling back to the
  * Contact Agent's LLM-recommended title. Returns null -- never throws out to
  * the caller -- whenever a verified contact isn't available for any reason:
- * no provider configured (the normal case until HUNTER_API_KEY is set), no
- * website on this account, a network/API failure, or no candidate confident
- * and relevant enough to surface (see rank.ts). Enrichment is additive
- * infrastructure layered on a pipeline that already works without it -- a
- * flaky third-party lookup must never turn into an account failure when the
+ * no provider configured (the normal case until a real one is set up), no
+ * website on this account, a network/API failure, taking too long (see
+ * ENRICHMENT_TIMEOUT_MS above), or no candidate confident and relevant
+ * enough to surface (see rank.ts). Enrichment is additive infrastructure
+ * layered on a pipeline that already works without it -- a flaky
+ * third-party lookup must never turn into an account failure when the
  * existing safe fallback is right there.
  */
 async function tryFindVerifiedContact(
@@ -508,7 +521,14 @@ async function tryFindVerifiedContact(
   if (!domain) return null;
 
   try {
-    const candidates = await provider.findContacts(domain);
+    const candidates = await Promise.race([
+      provider.findContacts({ domain, companyName: account.companyName }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), ENRICHMENT_TIMEOUT_MS)),
+    ]);
+    if (candidates === null) {
+      console.error(`[contact-enrichment] ${provider.name} lookup for ${domain} exceeded ${ENRICHMENT_TIMEOUT_MS}ms, falling back to a recommended title`);
+      return null;
+    }
     return pickBestContact(candidates, personaTitles);
   } catch (err) {
     console.error(`[contact-enrichment] ${provider.name} lookup failed for ${domain}, falling back to a recommended title:`, err);

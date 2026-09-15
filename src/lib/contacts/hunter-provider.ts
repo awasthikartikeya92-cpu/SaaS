@@ -1,4 +1,4 @@
-import type { ContactEnrichmentProvider, EnrichedContact } from "./provider";
+import type { ContactEnrichmentProvider, ContactLookupQuery, EnrichedContact } from "./provider";
 
 // Hunter.io's Domain Search API (https://api.hunter.io/v2/domain-search) --
 // given a company domain, returns real people Hunter has found associated
@@ -48,7 +48,9 @@ export class HunterProvider implements ContactEnrichmentProvider {
   name = "hunter";
   constructor(private apiKey: string) {}
 
-  async findContacts(domain: string): Promise<EnrichedContact[]> {
+  // Domain-only -- Hunter's Domain Search API doesn't take a company name,
+  // so `companyName` on the query is simply unused here.
+  async findContacts({ domain }: ContactLookupQuery): Promise<EnrichedContact[]> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {

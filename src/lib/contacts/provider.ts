@@ -21,8 +21,14 @@ export interface EnrichedContact {
   confidence: number;
 }
 
+export interface ContactLookupQuery {
+  /** Bare hostname (no protocol), e.g. "acme.com". */
+  domain: string;
+  /** Needed by providers that search by name rather than domain (e.g. a search-engine-snippet lookup can't query LinkedIn by raw domain the way it can query a domain-search API). */
+  companyName: string;
+}
+
 export interface ContactEnrichmentProvider {
   name: string;
-  /** `domain` is a bare hostname (no protocol), e.g. "acme.com". */
-  findContacts(domain: string): Promise<EnrichedContact[]>;
+  findContacts(query: ContactLookupQuery): Promise<EnrichedContact[]>;
 }
