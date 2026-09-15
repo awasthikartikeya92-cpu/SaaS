@@ -11,6 +11,7 @@ export type AnalyticsEvent =
   | "campaign_generate_succeeded"
   | "campaign_generate_failed"
   | "campaign_deleted"
+  | "campaign_retried"
   | "quota_blocked"
   | "checkout_started"
   | "subscription_activated"

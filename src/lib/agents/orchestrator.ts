@@ -215,28 +215,40 @@ async function stepOffering(campaign: typeof campaigns.$inferSelect, campaignId:
         knownPersonas: campaign.knownPersonas ?? undefined,
       });
 
-      const [offeringRow] = await db
-        .insert(offeringDnaTable)
-        .values({
-          campaignId,
-          coreProblem: offeringDna.coreProblem,
-          capabilities: offeringDna.capabilities,
-          differentiators: offeringDna.differentiators,
-          painPoints: offeringDna.painPoints,
-          buyingTriggers: offeringDna.buyingTriggers,
-          objections: offeringDna.objections,
-          alternatives: offeringDna.alternatives,
-        })
-        .returning();
+      // In a transaction -- required for a failed campaign to be safely
+      // retryable (see the Retry button in campaigns/[id]/page.tsx and
+      // POST /api/campaigns/[id]/retry), not just nice to have. Without
+      // it, a failure partway through the persona loop would leave the
+      // offering_dna row committed on its own; a retry re-running this
+      // whole stage from scratch would then hit offering_dna's UNIQUE
+      // campaignId constraint on the very first insert and fail every
+      // time after, with no way to recover short of a manual DB fix. The
+      // transaction makes a failure anywhere in this stage roll back
+      // everything it wrote, so a retry always starts from a clean slate.
+      await db.transaction(async (tx) => {
+        const [offeringRow] = await tx
+          .insert(offeringDnaTable)
+          .values({
+            campaignId,
+            coreProblem: offeringDna.coreProblem,
+            capabilities: offeringDna.capabilities,
+            differentiators: offeringDna.differentiators,
+            painPoints: offeringDna.painPoints,
+            buyingTriggers: offeringDna.buyingTriggers,
+            objections: offeringDna.objections,
+            alternatives: offeringDna.alternatives,
+          })
+          .returning();
 
-      for (const persona of offeringDna.personas) {
-        await db.insert(buyerPersonas).values({
-          offeringDnaId: offeringRow.id,
-          title: persona.title,
-          painPoints: persona.painPoints,
-          priorities: persona.priorities,
-        });
-      }
+        for (const persona of offeringDna.personas) {
+          await tx.insert(buyerPersonas).values({
+            offeringDnaId: offeringRow.id,
+            title: persona.title,
+            painPoints: persona.painPoints,
+            priorities: persona.priorities,
+          });
+        }
+      });
 
       return offeringDna;
     },
@@ -300,15 +312,21 @@ async function stepSignal(campaign: typeof campaigns.$inferSelect, campaignId: s
     async () => {
       const taxonomy = await runSignalAgent(offeringDna, icp);
 
-      const [taxonomyRow] = await db.insert(signalTaxonomies).values({ campaignId }).returning();
-      for (const s of taxonomy.signals) {
-        await db.insert(signalDefinitions).values({
-          taxonomyId: taxonomyRow.id,
-          name: s.name,
-          tier: s.tier,
-          description: s.description,
-        });
-      }
+      // In a transaction -- same reasoning as stepOffering's: without it, a
+      // failure partway through the definitions loop would leave the
+      // signal_taxonomies row committed alone, and a retry would hit its
+      // UNIQUE campaignId constraint on the first insert every time after.
+      await db.transaction(async (tx) => {
+        const [taxonomyRow] = await tx.insert(signalTaxonomies).values({ campaignId }).returning();
+        for (const s of taxonomy.signals) {
+          await tx.insert(signalDefinitions).values({
+            taxonomyId: taxonomyRow.id,
+            name: s.name,
+            tier: s.tier,
+            description: s.description,
+          });
+        }
+      });
 
       return taxonomy;
     },
@@ -353,98 +371,111 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
         .sort(([, a], [, b]) => b.length - a.length)
         .slice(0, MAX_ACCOUNTS_PER_CAMPAIGN);
 
-      for (const [companyName, signalsForCompany] of companiesToProcess) {
-        const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
-        const [account] = await db
-          .insert(accounts)
-          .values({
-            campaignId,
-            companyName,
-            website: signalsForCompany[0].companyWebsite ?? null,
-            industry,
-            status: "pending",
-          })
-          .returning();
-
-        // Matched once per signal and reused below for both the persisted
-        // accountSignals row and the intent calculation -- these used to be
-        // two separate lookups (a fuzzy substring match here, an exact-name
-        // match down in computeIntent's input) that almost never agreed,
-        // since sig.signalHint is essentially never byte-identical to a
-        // taxonomy entry's name. That silently made computeIntent treat
-        // nearly every signal as the weakest tier (the `?? 3` fallback),
-        // regardless of what tier the account's own signal list showed the
-        // user.
-        const matchedTaxonomyEntries = signalsForCompany.map((sig) =>
-          taxonomy.signals.find((t) => sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8)))
-        );
-
-        for (const [i, sig] of signalsForCompany.entries()) {
-          const [sourceRow] = await db
-            .insert(researchSources)
+      // The whole loop below runs inside one transaction -- same reasoning
+      // as stepOffering's and stepSignal's, but the stakes are higher
+      // here: accounts has no unique constraint on (campaignId,
+      // companyName), so without a transaction a failure partway through
+      // company N wouldn't even fail loudly on retry -- it would silently
+      // re-insert companies 1..N-1 as duplicate account rows (research
+      // returns roughly the same companies again), doubling them up in
+      // the UI with no error to explain why. One transaction around the
+      // whole loop means a failure anywhere rolls back every company this
+      // attempt inserted, so a retry always starts from zero accounts for
+      // this stage, not a partial, silently-duplicating set.
+      await db.transaction(async (tx) => {
+        for (const [companyName, signalsForCompany] of companiesToProcess) {
+          const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
+          const [account] = await tx
+            .insert(accounts)
             .values({
-              researchRunId,
-              url: sig.sourceUrl,
-              publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-              excerpt: sig.evidence,
+              campaignId,
+              companyName,
+              website: signalsForCompany[0].companyWebsite ?? null,
+              industry,
+              status: "pending",
             })
             .returning();
 
-          const matchedTaxonomyEntry = matchedTaxonomyEntries[i];
+          // Matched once per signal and reused below for both the persisted
+          // accountSignals row and the intent calculation -- these used to
+          // be two separate lookups (a fuzzy substring match here, an
+          // exact-name match down in computeIntent's input) that almost
+          // never agreed, since sig.signalHint is essentially never
+          // byte-identical to a taxonomy entry's name. That silently made
+          // computeIntent treat nearly every signal as the weakest tier
+          // (the `?? 3` fallback), regardless of what tier the account's
+          // own signal list showed the user.
+          const matchedTaxonomyEntries = signalsForCompany.map((sig) =>
+            taxonomy.signals.find((t) => sig.signalHint.toLowerCase().includes(t.name.toLowerCase().slice(0, 8)))
+          );
 
-          await db.insert(accountSignals).values({
-            accountId: account.id,
-            signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
-            tier: matchedTaxonomyEntry?.tier ?? 3,
-            strength: sig.confidence * 100,
-            confidence: sig.confidence,
-            detectedAt: new Date(sig.detectedAt),
-            publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
-            verified: sig.verified,
-            evidence: sig.evidence,
-            sourceId: sourceRow.id,
+          for (const [i, sig] of signalsForCompany.entries()) {
+            const [sourceRow] = await tx
+              .insert(researchSources)
+              .values({
+                researchRunId,
+                url: sig.sourceUrl,
+                publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+                excerpt: sig.evidence,
+              })
+              .returning();
+
+            const matchedTaxonomyEntry = matchedTaxonomyEntries[i];
+
+            await tx.insert(accountSignals).values({
+              accountId: account.id,
+              signalName: matchedTaxonomyEntry?.name ?? sig.signalHint,
+              tier: matchedTaxonomyEntry?.tier ?? 3,
+              strength: sig.confidence * 100,
+              confidence: sig.confidence,
+              detectedAt: new Date(sig.detectedAt),
+              publishedAt: sig.publishedAt ? new Date(sig.publishedAt) : null,
+              verified: sig.verified,
+              evidence: sig.evidence,
+              sourceId: sourceRow.id,
+            });
+          }
+
+          const icpFit = computeIcpFit({
+            // `industry` above is always icp.industries[0] -- there's no
+            // firmographic enrichment connected yet to independently verify
+            // which industry an account actually operates in (see
+            // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap
+            // item). The previous `icp.industries.includes(industry) ? 90 :
+            // 45` check was tautological -- industry was assigned FROM that
+            // exact array moments earlier, so it was always true, always 90,
+            // on every single account in every campaign, while looking like
+            // a real per-account comparison. Flattened to the same honest,
+            // clearly-labeled placeholder as the sub-scores below rather
+            // than a check that's always true dressed up as a real one --
+            // until real firmographic data exists to genuinely tell
+            // accounts apart on this dimension.
+            industryMatch: 65,
+            geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
+            sizeMatch: 65,
+            businessModelMatch: 65,
+            techEnvironmentMatch: 60,
+            problemRelevance: 70,
           });
+          const intent = computeIntent(
+            signalsForCompany.map((s, i) => ({
+              tier: (matchedTaxonomyEntries[i]?.tier ?? 3) as 1 | 2 | 3,
+              confidence: s.confidence,
+              detectedAt: new Date(s.detectedAt),
+            }))
+          );
+
+          // reachability/opportunity are placeholders until stepContact
+          // runs for this account -- both depend on contact.confidence,
+          // which doesn't exist yet. accountScores has no nullable columns
+          // for these (every score shown in the UI is meant to be a real,
+          // explained number, not a guess -- see src/lib/scoring/index.ts),
+          // so 0 stands in; the UI hides the score entirely for a
+          // non-"done" account rather than showing a misleading 0 (see
+          // campaigns/[id]/page.tsx).
+          await tx.insert(accountScores).values({ accountId: account.id, icpFit, intent, reachability: 0, opportunity: 0 });
         }
-
-        const icpFit = computeIcpFit({
-          // `industry` above is always icp.industries[0] -- there's no
-          // firmographic enrichment connected yet to independently verify
-          // which industry an account actually operates in (see
-          // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap
-          // item). The previous `icp.industries.includes(industry) ? 90 :
-          // 45` check was tautological -- industry was assigned FROM that
-          // exact array moments earlier, so it was always true, always 90,
-          // on every single account in every campaign, while looking like
-          // a real per-account comparison. Flattened to the same honest,
-          // clearly-labeled placeholder as the sub-scores below rather
-          // than a check that's always true dressed up as a real one --
-          // until real firmographic data exists to genuinely tell
-          // accounts apart on this dimension.
-          industryMatch: 65,
-          geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
-          sizeMatch: 65,
-          businessModelMatch: 65,
-          techEnvironmentMatch: 60,
-          problemRelevance: 70,
-        });
-        const intent = computeIntent(
-          signalsForCompany.map((s, i) => ({
-            tier: (matchedTaxonomyEntries[i]?.tier ?? 3) as 1 | 2 | 3,
-            confidence: s.confidence,
-            detectedAt: new Date(s.detectedAt),
-          }))
-        );
-
-        // reachability/opportunity are placeholders until stepContact runs
-        // for this account -- both depend on contact.confidence, which
-        // doesn't exist yet. accountScores has no nullable columns for
-        // these (every score shown in the UI is meant to be a real,
-        // explained number, not a guess -- see src/lib/scoring/index.ts),
-        // so 0 stands in; the UI hides the score entirely for a non-"done"
-        // account rather than showing a misleading 0 (see
-        // campaigns/[id]/page.tsx).
-        await db.insert(accountScores).values({ accountId: account.id, icpFit, intent, reachability: 0, opportunity: 0 });
-      }
+      });
 
       return rawEvidence;
     },

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { OpportunityScore } from "@/components/dashboard/score-bar";
 import { TierBadge } from "@/components/dashboard/tier-badge";
-import { RefreshButton } from "@/components/dashboard/refresh-button";
+import { RetryCampaignButton } from "@/components/dashboard/retry-campaign-button";
 import { GenerationProgress } from "@/components/dashboard/generation-progress";
 import { DeleteCampaignButton } from "@/components/dashboard/delete-campaign-button";
 
@@ -72,7 +72,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           {campaign.website && <p className="text-sm text-ink-soft">{campaign.website}</p>}
         </div>
         <div className="flex items-center gap-2">
-          {campaign.status === "failed" && <RefreshButton />}
+          {campaign.status === "failed" && <RetryCampaignButton campaignId={id} />}
           <DeleteCampaignButton campaignId={id} campaignName={campaign.name} redirectTo="/campaigns" variant="destructive" />
         </div>
       </div>
@@ -104,7 +104,8 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
               </p>
             )}
             <p className="mt-3 text-xs text-ink-soft">
-              {failureHint} Create a new campaign to try again -- there&apos;s no retry for this one yet.
+              {failureHint} Click &quot;Retry generation&quot; above to resume -- everything that already
+              completed is kept; only the failed step (and anything after it) runs again.
             </p>
             {(progress.stages.offering === "success" ||
               progress.stages.icp === "success" ||

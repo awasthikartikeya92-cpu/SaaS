@@ -22,6 +22,14 @@ describe("decideStageAction", () => {
     // other caller can observe it -- but decideStageAction should never
     // treat "error" as a green light to skip the stage regardless, since
     // nothing about the campaign lifecycle should rely on that timing.
+    //
+    // This is also the exact mechanism POST /api/campaigns/[id]/retry
+    // depends on to resume a failed campaign correctly: flipping the
+    // campaign back to "generating" does nothing on its own to pick the
+    // right stage back up -- it's this function returning "not-started"
+    // for the one stage whose last run errored (while every earlier stage,
+    // still "success", stays "already-done") that makes runNextStep()
+    // re-run only the failed stage instead of everything from scratch.
     expect(decideStageAction("error")).toBe("not-started");
   });
 

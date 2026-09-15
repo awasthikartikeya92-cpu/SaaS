@@ -553,6 +553,61 @@ worked through top to bottom.
     next real campaign run, especially one with a large-enterprise ICP, is
     the actual end-to-end confirmation.
 
+- **A failed campaign can now actually be retried, resuming where it left
+  off** -- previously a dead end: the "Refresh" button on a failed
+  campaign only did `router.refresh()` (a page reload), which never calls
+  `/step` and so can't possibly resume anything, and the failure card's
+  own copy said so outright ("Create a new campaign to try again -- there's
+  no retry for this one yet"). The only way forward was starting over
+  completely, discarding whatever had already succeeded (Offering DNA,
+  ICP, signal taxonomy could all be sitting there generated and unused).
+  - New `POST /api/campaigns/[id]/retry` (`src/app/api/campaigns/[id]/retry/route.ts`)
+    flips a failed campaign's status back to `"generating"`. Nothing more
+    than that is needed to resume correctly -- `runNextStep()`'s stage
+    gates (`stageGate`/`decideStageAction` in orchestrator.ts/
+    stage-decision.ts) already skip any stage whose last run succeeded and
+    re-run only the one whose last run errored, so the very next `/step`
+    poll (fired automatically once `<GenerationProgress>` mounts) resumes
+    at exactly the right place.
+  - New `RetryCampaignButton` (`src/components/dashboard/retry-campaign-button.tsx`)
+    replaces the old, misleadingly-named `RefreshButton` (deleted) on the
+    failed-campaign card: calls the retry route, then `router.refresh()`
+    -- since the campaign is `"generating"` now, the page's own
+    `stillGenerating` check swaps the failure card for
+    `<GenerationProgress>`, which starts polling on its own.
+  - **This only became safe to ship alongside the RCA fix above, not
+    before it** -- retrying a stage blindly re-runs its LLM call *and*
+    its database writes from scratch. Before this pass, a stage that
+    failed partway through writing (e.g. after inserting `offering_dna`
+    but before finishing its persona loop) would leave that row committed
+    on its own; retrying would then hit `offering_dna`'s `UNIQUE
+    campaignId` constraint on the very first insert of the very next
+    attempt, and fail the exact same way forever -- worse than no retry
+    at all, since it looks like it should work. Fixed by wrapping each
+    shared stage's persistence (`stepOffering`/`stepSignal`/
+    `stepResearchAndSeedAccounts` in orchestrator.ts) in its own
+    `db.transaction()`: a failure anywhere in a stage now rolls back
+    everything *that stage* wrote, so a retry always starts from a
+    genuinely clean slate. This mattered most for
+    `stepResearchAndSeedAccounts`, which loops per discovered company --
+    without a transaction, a failure on company 7 of 10 wouldn't even
+    fail loudly on retry (`accounts` has no unique constraint on
+    company name), it would silently re-insert companies 1-6 as
+    duplicates.
+  - Retrying does spend real tokens again for whatever stage re-runs --
+    there's no cap on manual retries (the user has to click the button
+    each time, so there's no runaway-loop risk), but this is worth knowing
+    once real per-campaign cost data exists (see item #2 below).
+  - Not verified against a live Postgres instance (same sandbox
+    restriction as above) -- specifically, the transaction-rollback
+    behavior itself (that a failure partway through
+    `stepResearchAndSeedAccounts`'s loop actually leaves zero rows behind,
+    not a partial set) can't be exercised without a real database; this
+    codebase's existing tests already can't touch orchestrator.ts at all
+    for the same reason (it imports `db` at module scope -- see
+    stage-decision.ts's own comment on why that logic was pulled out
+    separately). A real failed-then-retried campaign is the actual test.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds
