@@ -5,6 +5,7 @@ import { getOrganizationPlan } from "@/lib/billing/quota";
 import { getOrganizationUsageThisPeriod } from "@/lib/billing/usage-tracking";
 import { PLANS } from "@/lib/billing/plans";
 import { UpgradeButton } from "@/components/dashboard/upgrade-button";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -19,10 +20,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-[var(--font-display)] text-2xl">Settings</h1>
-        <p className="text-sm text-ink-soft">Organization, plan, and scoring configuration.</p>
-      </div>
+      <PageHeader title="Settings" description="Organization, plan, and scoring configuration." />
 
       <Card>
         <CardHeader><CardTitle>Plan & usage</CardTitle></CardHeader>

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth/auth-shell";
 
 export default function ResetPasswordPage() {
   // useSearchParams() requires a Suspense boundary in the App Router --
@@ -115,15 +115,5 @@ function ResetPasswordForm() {
 }
 
 function ResetPasswordShell({ children }: { children: React.ReactNode }) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-paper px-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <p className="font-[var(--font-display)] text-2xl">SignalIQ</p>
-          <CardTitle>Set a new password</CardTitle>
-        </CardHeader>
-        <CardContent>{children}</CardContent>
-      </Card>
-    </main>
-  );
+  return <AuthShell title="Set a new password">{children}</AuthShell>;
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AlertTriangle, XCircle } from "lucide-react";
 import { auth } from "@/auth";
 import { getCampaignDetail, getGenerationProgress, getCampaignAnalytics, getCampaignSignals, getCampaignContacts } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,6 +62,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
           <div className="flex items-center gap-3">
             <h1 className="font-[var(--font-display)] text-2xl">{campaign.name}</h1>
             <Badge
+              dot
               variant={
                 campaign.status === "active"
                   ? "positive"
@@ -85,55 +87,61 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
       {stillGenerating && <GenerationProgress campaignId={id} initial={progress} />}
 
       {campaign.status === "active" && progress.failedAccounts.length > 0 && (
-        <Card>
-          <CardContent className="pt-5 text-sm">
-            <p className="font-medium text-ink">
-              {progress.failedAccounts.length} of {progress.accountsTotal} account
-              {progress.accountsTotal === 1 ? "" : "s"} couldn&apos;t be fully processed.
-            </p>
-            <p className="mt-1 text-xs text-ink-soft">
-              Everything else below completed normally -- one account failing doesn&apos;t affect the others.
-              Affected: {progress.failedAccounts.map((a) => a.companyName).join(", ")}.
-            </p>
+        <Card className="border-l-4 border-l-tier-2">
+          <CardContent className="flex gap-3 pt-5 text-sm">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-tier-2" />
+            <div>
+              <p className="font-medium text-ink">
+                {progress.failedAccounts.length} of {progress.accountsTotal} account
+                {progress.accountsTotal === 1 ? "" : "s"} couldn&apos;t be fully processed.
+              </p>
+              <p className="mt-1 text-xs text-ink-soft">
+                Everything else below completed normally -- one account failing doesn&apos;t affect the others.
+                Affected: {progress.failedAccounts.map((a) => a.companyName).join(", ")}.
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}
 
       {campaign.status === "failed" && (
-        <Card>
-          <CardContent className="pt-5 text-sm">
-            <p className="font-medium text-negative">Generation failed{latestRun ? ` at ${latestRun.agent}` : ""}.</p>
-            {latestRun?.error && (
-              <p className="mt-2 whitespace-pre-wrap font-[var(--font-data)] text-xs text-ink-soft">
-                {latestRun.error}
+        <Card className="border-l-4 border-l-negative">
+          <CardContent className="flex gap-3 pt-5 text-sm">
+            <XCircle className="mt-0.5 size-4 shrink-0 text-negative" />
+            <div className="flex-1">
+              <p className="font-medium text-negative">Generation failed{latestRun ? ` at ${latestRun.agent}` : ""}.</p>
+              {latestRun?.error && (
+                <p className="mt-2 whitespace-pre-wrap font-[var(--font-data)] text-xs text-ink-soft">
+                  {latestRun.error}
+                </p>
+              )}
+              <p className="mt-3 text-xs text-ink-soft">
+                {failureHint} Click &quot;Retry generation&quot; above to resume -- everything that already
+                completed is kept; only the failed step (and anything after it) runs again.
               </p>
-            )}
-            <p className="mt-3 text-xs text-ink-soft">
-              {failureHint} Click &quot;Retry generation&quot; above to resume -- everything that already
-              completed is kept; only the failed step (and anything after it) runs again.
-            </p>
-            {(progress.stages.offering === "success" ||
-              progress.stages.icp === "success" ||
-              progress.stages.signal === "success" ||
-              progress.stages.research === "success" ||
-              progress.accountsTotal > 0) && (
-              <div className="mt-4 border-t border-line pt-3">
-                <p className="text-xs font-medium text-ink-soft">What already completed before this failure:</p>
-                <ul className="mt-1.5 flex flex-col gap-0.5 text-xs text-ink-soft">
-                  <li>Offering DNA: {progress.stages.offering === "success" ? "done" : "not reached"}</li>
-                  <li>ICP: {progress.stages.icp === "success" ? "done" : "not reached"}</li>
-                  <li>Signal taxonomy: {progress.stages.signal === "success" ? "done" : "not reached"}</li>
-                  <li>Research: {progress.stages.research === "success" ? "done" : "not reached"}</li>
-                  {progress.accountsTotal > 0 && (
-                    <li>
-                      Accounts: {progress.accountsDone} of {progress.accountsTotal} processed
-                      {progress.failedAccounts.length > 0 &&
-                        ` (${progress.failedAccounts.length} failed: ${progress.failedAccounts.map((a) => a.companyName).join(", ")})`}
-                    </li>
-                  )}
-                </ul>
-              </div>
-            )}
+              {(progress.stages.offering === "success" ||
+                progress.stages.icp === "success" ||
+                progress.stages.signal === "success" ||
+                progress.stages.research === "success" ||
+                progress.accountsTotal > 0) && (
+                <div className="mt-4 border-t border-line pt-3">
+                  <p className="text-xs font-medium text-ink-soft">What already completed before this failure:</p>
+                  <ul className="mt-1.5 flex flex-col gap-0.5 text-xs text-ink-soft">
+                    <li>Offering DNA: {progress.stages.offering === "success" ? "done" : "not reached"}</li>
+                    <li>ICP: {progress.stages.icp === "success" ? "done" : "not reached"}</li>
+                    <li>Signal taxonomy: {progress.stages.signal === "success" ? "done" : "not reached"}</li>
+                    <li>Research: {progress.stages.research === "success" ? "done" : "not reached"}</li>
+                    {progress.accountsTotal > 0 && (
+                      <li>
+                        Accounts: {progress.accountsDone} of {progress.accountsTotal} processed
+                        {progress.failedAccounts.length > 0 &&
+                          ` (${progress.failedAccounts.length} failed: ${progress.failedAccounts.map((a) => a.companyName).join(", ")})`}
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -259,7 +267,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                       </Link>
                     </TableCell>
                     <TableCell>
-                      {c.isVerified ? <Badge variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
+                      {c.isVerified ? <Badge dot variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
                     </TableCell>
                     <TableCell className="max-w-xs text-sm text-ink-soft">{c.relevance}</TableCell>
                   </TableRow>

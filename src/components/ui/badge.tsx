@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
   {
     variants: {
       variant: {
@@ -22,10 +22,21 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  /** Only for badges that represent a live status (campaign/account state,
+   *  verification), never a plain descriptive tag (an industry, a
+   *  geography) -- the dot reads as "this can change," which isn't true of
+   *  a tag. */
+  dot?: boolean;
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <span className={cn(badgeVariants({ variant }), className)} {...props} />;
+function Badge({ className, variant, dot, ...props }: BadgeProps) {
+  return (
+    <span className={cn(badgeVariants({ variant }), className)} {...props}>
+      {dot && <span className="size-1.5 shrink-0 rounded-full bg-current opacity-70" />}
+      {props.children}
+    </span>
+  );
 }
 
 export { Badge, badgeVariants };

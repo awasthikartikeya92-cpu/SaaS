@@ -755,6 +755,89 @@ worked through top to bottom.
     across a real multi-campaign, multi-account organization is worth a
     manual pass once there's a live Postgres to test against.
 
+- **UI polish pass -- "refine current identity," not a redesign.** The
+  brief was explicitly to raise craft within the existing Spectral/IBM
+  Plex/tier-color identity, not move toward a different visual language --
+  every change below is additive to the existing design tokens in
+  `globals.css`, nothing was replaced.
+  - **Elevation.** Added ink-tinted `--shadow-xs/sm/md/lg` tokens (warm,
+    low-opacity, not pure black -- reads as depth on the `--paper`
+    background instead of a grey haze) that override Tailwind's own
+    `--shadow-*` theme keys, so every `shadow-*` utility anywhere in the
+    app picks them up automatically. `Card` now carries `shadow-xs` by
+    default; interactive cards (`CampaignCard`, `KpiTiles`) lift to
+    `shadow-sm`/`shadow-md` on hover.
+  - **Buttons** gained real depth (`shadow-sm`, a pressed `active:translate-y-px`
+    with `active:shadow-xs`) and `cursor-pointer` -- previously indistinguishable
+    from a flat `<div>` until you hovered.
+  - **Inputs/Textarea/Select** get a soft accent-tinted focus ring
+    (`shadow-[0_0_0_3px_var(--accent-soft)]`) instead of just a border-color
+    swap, and a subtle hover border -- the kind of tactile feedback every
+    enterprise SaaS form has and this one didn't.
+  - **Table** header is now uppercase/tracked (`text-[11px] font-semibold
+    tracking-wide uppercase`) instead of plain small text, and row hover
+    uses `accent-soft/40` instead of the same flat grey as the header --
+    was previously hard to tell a hovered row from the header band at a
+    glance.
+  - **Badge** gained an opt-in `dot` prop (a live-status indicator) used
+    only where a badge actually represents state that can change --
+    campaign/account status, contact verification -- never on a plain
+    descriptive tag (an industry, a geography in `TagList`), where a dot
+    would incorrectly imply liveness.
+  - **Dashboard sidebar** (`dashboard-shell.tsx`): added real active-nav
+    highlighting (`usePathname` + `isNavActive`, with `/accounts/[id]`
+    correctly lighting up "Campaigns" since it isn't its own nav
+    destination) -- previously every nav item looked identical regardless
+    of what page you were on. Added a small brand mark (a monogram square)
+    next to the wordmark, and turned the bare user-email line at the
+    bottom into an avatar-initial + email row.
+  - **New `PageHeader`** component (`components/dashboard/page-header.tsx`)
+    replaces four near-identical hand-rolled `<h1>+description+actions>`
+    blocks (`/overview`, `/campaigns`, `/reports`, `/settings`) with one
+    shared layout -- consistency across pages is itself part of what reads
+    as "enterprise" rather than "prototype."
+  - **New `AuthShell`** component (`components/auth/auth-shell.tsx`)
+    replaces four separately hand-rolled centered-card shells (login,
+    signup, forgot-password, reset-password) with one: a subtle radial
+    accent-tinted backdrop, the same brand mark as the dashboard sidebar,
+    and a real `shadow-lg` card -- these are the first four screens a
+    signed-out visitor ever sees, and previously the plainest pages in the
+    product.
+  - **Loading states, for real this time.** `Skeleton` existed in
+    `components/ui/` but was never imported anywhere -- every dashboard
+    page was a blank flash until its server-rendered data arrived. Added
+    Next.js `loading.tsx` route boundaries (using `Skeleton`, shaped to
+    each page's actual layout to avoid content jumping on load) for
+    `/overview`, `/campaigns`, `/campaigns/[id]`, `/reports`, and
+    `/accounts/[id]`. Also gave `Skeleton` itself a moving shimmer gradient
+    (a new `--animate-shimmer` keyframe) instead of a flat pulse.
+  - **KPI tiles and generation-progress** got small "why is this
+    trustworthy" touches: each KPI tile now carries a small icon (Building2/
+    ShieldCheck/TrendingUp/Flag) tying the number to what it represents,
+    and the stage-progress connector line between two completed generation
+    stages now turns green instead of staying neutral grey, so "how far
+    along is this" reads at a glance instead of requiring reading every
+    chip.
+  - **Alert cards** (the campaign-detail "some accounts failed" and
+    "generation failed" cards) gained a colored left border and matching
+    icon (`AlertTriangle`/`XCircle`) -- previously identical in appearance
+    to every other neutral `Card` on the page despite being the two states
+    that most need to stand out.
+  - Verified with real components against fixture data on a temporary,
+    auth-excluded preview route (same constraint as above -- no live
+    Postgres here), covering every changed primitive plus the sidebar,
+    campaign picker, KPI tiles, alert cards, generation-progress stages,
+    and the auth shell -- screenshotted at desktop and mobile widths (and
+    a hover state on the campaign card), then deleted the preview route,
+    reverted the temporary `proxy.ts` matcher change, and uninstalled the
+    temporarily-reinstalled `playwright-core` dev dependency before
+    committing. `tsc`, `lint`, `vitest` (81/81), and a full production
+    build (all 26 routes) all pass. Not verified: real click-through
+    interaction (hover/focus/active states were screenshotted but not
+    exhaustively interacted with), and nothing here touches actual layout
+    structure or data -- it's presentation only, so the multi-tenancy and
+    scoring logic this sits on top of are unaffected.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds

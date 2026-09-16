@@ -119,7 +119,9 @@ export function GenerationProgress({ campaignId, initial }: { campaignId: string
                   {state === "active" && <Loader2 className="size-3.5 animate-spin" />}
                   {s.label}
                 </div>
-                {i < STAGES.length - 1 && <div className="h-px w-3 bg-line" />}
+                {i < STAGES.length - 1 && (
+                  <div className={cn("h-px w-3", state === "done" ? "bg-positive/50" : "bg-line")} />
+                )}
               </div>
             );
           })}

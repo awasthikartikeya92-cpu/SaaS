@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   LayoutGrid,
   Megaphone,
@@ -24,6 +25,16 @@ const NAV = [
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+// An account's own detail page lives at /accounts/[id], reached only by
+// drilling into a campaign -- it isn't its own nav destination (the old
+// /accounts index is gone), so it should still light up "Campaigns" rather
+// than leaving the whole sidebar looking un-navigated.
+function isNavActive(pathname: string, href: string) {
+  if (pathname === href || pathname.startsWith(`${href}/`)) return true;
+  if (href === "/campaigns" && pathname.startsWith("/accounts")) return true;
+  return false;
+}
 
 /**
  * The dashboard's navigation shell. Below `md`, the 224px sidebar used to
@@ -49,6 +60,7 @@ export function DashboardShell({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
     if (!open) return;
@@ -69,8 +81,8 @@ export function DashboardShell({
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-paper-raised px-4 md:hidden">
-        <span className="font-[var(--font-display)] text-lg">SignalIQ</span>
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-paper-raised px-4 shadow-xs md:hidden">
+        <Logo />
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -91,13 +103,13 @@ export function DashboardShell({
 
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col border-r border-line bg-paper-raised transition-transform duration-200",
+          "fixed inset-y-0 left-0 z-50 flex w-64 shrink-0 flex-col border-r border-line bg-paper-raised shadow-lg transition-transform duration-200 md:shadow-none",
           "md:static md:z-auto md:w-56 md:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex h-14 items-center justify-between px-5 md:justify-start">
-          <span className="font-[var(--font-display)] text-lg">SignalIQ</span>
+          <Logo />
           <button
             type="button"
             onClick={() => setOpen(false)}
@@ -108,20 +120,36 @@ export function DashboardShell({
           </button>
         </div>
         <nav className="flex flex-1 flex-col gap-0.5 px-3">
-          {NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-sm text-ink-soft transition-colors hover:bg-paper hover:text-ink"
-            >
-              <item.icon className="size-4" />
-              {item.label}
-            </Link>
-          ))}
+          {NAV.map((item) => {
+            const active = isNavActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors",
+                  active
+                    ? "bg-accent-soft text-accent"
+                    : "text-ink-soft hover:bg-paper hover:text-ink"
+                )}
+              >
+                <item.icon className="size-4" />
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="border-t border-line p-3">
-          <div className="mb-2 px-3 text-xs text-ink-soft">{userEmail}</div>
+          <div className="mb-2 flex items-center gap-2.5 px-3">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-ink text-xs font-medium text-paper">
+              {userEmail.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0 text-xs text-ink-soft">
+              <p className="truncate">{userEmail}</p>
+            </div>
+          </div>
           <form action={onSignOut}>
             <button
               type="submit"
@@ -138,5 +166,16 @@ export function DashboardShell({
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 md:px-8 md:py-8">{children}</div>
       </main>
     </div>
+  );
+}
+
+function Logo() {
+  return (
+    <span className="flex items-center gap-2">
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-sm)] bg-ink font-[var(--font-display)] text-sm text-paper">
+        S
+      </span>
+      <span className="font-[var(--font-display)] text-lg">SignalIQ</span>
+    </span>
   );
 }

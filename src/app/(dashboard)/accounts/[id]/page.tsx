@@ -104,7 +104,7 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
             <div key={c.id}>
               <div className="flex items-center gap-2">
                 <p className="text-sm font-medium">{c.name ?? c.title}</p>
-                {c.isVerified ? <Badge variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
+                {c.isVerified ? <Badge dot variant="positive">Verified</Badge> : <Badge variant="neutral">Recommended title</Badge>}
               </div>
               {c.name && <p className="text-xs text-ink-soft">{c.title}</p>}
               <p className="mt-1 text-sm text-ink-soft">{c.relevance}</p>

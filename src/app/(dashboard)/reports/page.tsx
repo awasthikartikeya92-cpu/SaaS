@@ -6,6 +6,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 export default async function ReportsPage() {
   const session = await auth();
@@ -21,10 +22,7 @@ export default async function ReportsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-[var(--font-display)] text-2xl">Reports</h1>
-        <p className="text-sm text-ink-soft">Generate a campaign report, then export it.</p>
-      </div>
+      <PageHeader title="Reports" description="Generate a campaign report, then export it." />
 
       <Card>
         <CardHeader><CardTitle>Generate a new report</CardTitle></CardHeader>

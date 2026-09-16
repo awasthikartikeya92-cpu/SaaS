@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
 import { DeleteCampaignButton } from "@/components/dashboard/delete-campaign-button";
+import { PageHeader } from "@/components/dashboard/page-header";
 
 export default async function CampaignsPage() {
   const session = await auth();
@@ -19,16 +20,14 @@ export default async function CampaignsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-[var(--font-display)] text-2xl">Campaigns</h1>
-          <p className="text-sm text-ink-soft">Each campaign is one offering and its account universe.</p>
-        </div>
-        <Button asChild variant="accent"><Link href="/campaigns/new">New campaign</Link></Button>
-      </div>
+      <PageHeader
+        title="Campaigns"
+        description="Each campaign is one offering and its account universe."
+        actions={<Button asChild variant="accent"><Link href="/campaigns/new">New campaign</Link></Button>}
+      />
 
       {rows.length === 0 ? (
-        <div className="rounded-[var(--radius-lg)] border border-dashed border-line-strong py-16 text-center text-sm text-ink-soft">
+        <div className="rounded-[var(--radius-lg)] border border-dashed border-line-strong bg-paper-raised/40 py-16 text-center text-sm text-ink-soft">
           No campaigns yet -- create one to get started.
         </div>
       ) : (
@@ -65,5 +64,9 @@ export default async function CampaignsPage() {
 
 function StatusBadge({ status }: { status: string }) {
   const variant = status === "active" ? "positive" : status === "generating" ? "accent" : "neutral";
-  return <Badge variant={variant}>{status}</Badge>;
+  return (
+    <Badge variant={variant} dot>
+      {status}
+    </Badge>
+  );
 }

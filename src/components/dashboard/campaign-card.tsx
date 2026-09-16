@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
@@ -17,8 +18,8 @@ export function CampaignCard({ campaign, kpis }: { campaign: typeof campaigns.$i
   const stillGenerating = campaign.status === "draft" || campaign.status === "generating";
 
   return (
-    <Link href={`/campaigns/${campaign.id}`} className="block">
-      <Card className="h-full transition-colors hover:border-line-strong">
+    <Link href={`/campaigns/${campaign.id}`} className="group block">
+      <Card className="h-full transition-[box-shadow,transform,border-color] duration-150 group-hover:-translate-y-0.5 group-hover:border-line-strong group-hover:shadow-md">
         <CardContent className="flex h-full flex-col gap-4 pt-5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
@@ -26,6 +27,7 @@ export function CampaignCard({ campaign, kpis }: { campaign: typeof campaigns.$i
               {campaign.website && <p className="truncate text-xs text-ink-soft">{campaign.website}</p>}
             </div>
             <Badge
+              dot
               variant={
                 campaign.status === "active" ? "positive" : campaign.status === "failed" ? "negative" : stillGenerating ? "accent" : "neutral"
               }
@@ -53,7 +55,10 @@ export function CampaignCard({ campaign, kpis }: { campaign: typeof campaigns.$i
             </div>
           )}
 
-          <p className="mt-auto text-xs text-ink-soft">Created {formatDate(campaign.createdAt)}</p>
+          <div className="mt-auto flex items-center justify-between">
+            <p className="text-xs text-ink-soft">Created {formatDate(campaign.createdAt)}</p>
+            <ChevronRight className="size-4 text-ink-soft/60 transition-transform group-hover:translate-x-0.5 group-hover:text-accent" />
+          </div>
         </CardContent>
       </Card>
     </Link>
