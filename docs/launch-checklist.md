@@ -699,6 +699,62 @@ worked through top to bottom.
     silently, on purpose -- see its own comment on why), not that
     anything is broken.
 
+- **Dashboard restructured around the campaign, not the organization.**
+  The actual bug the user flagged: `/overview`, `/accounts`, `/signals`,
+  and `/contacts` were each one org-wide page blending every campaign's
+  accounts/signals/contacts (and KPIs computed) together. That's not just
+  visually cluttered, it's meaningless once an org runs more than one
+  campaign -- a "hot" account under one offering's ICP/signal taxonomy
+  isn't comparable to one under a different campaign's, so averaging or
+  counting them together produces a number with no real interpretation.
+  Confirmed the fix with the user first (two scoping questions -- make
+  Accounts/Signals/Contacts per-campaign too, not just KPIs; and redesign
+  `/overview` as the campaign picker rather than adding a new page) before
+  writing any code.
+  - `src/lib/db/queries.ts`: pulled the KPI formula that used to live only
+    inside `getDashboardData` out into a standalone `computeAccountKpis`,
+    then added four campaign-scoped replacements --
+    `getCampaignSummaries` (one org-wide fetch, partitioned in-memory per
+    campaign, for the picker grid), `getCampaignAnalytics` (KPIs + top
+    accounts for one campaign), `getCampaignSignals`, and
+    `getCampaignContacts` (each `null` if the campaign isn't found or
+    isn't owned by the caller's org -- same tenant-isolation contract as
+    the existing `getOwnedCampaign`). Removed `getDashboardData`,
+    `getAllSignals`, `getAllContacts` outright rather than leaving them as
+    dead code, since nothing else called them.
+  - `/overview` is now the campaign picker: one `CampaignCard` per
+    campaign (status badge, accounts/high-priority counts, hot/warm/emerging
+    dots, created date), each linking to `/campaigns/[id]`; an empty state
+    when the org has no campaigns yet instead of an empty dashboard.
+  - `/campaigns/[id]` gained three tabs -- Overview (the new `KpiTiles`
+    component plus a top-accounts table, scoped to this one campaign),
+    Contacts, and Signals -- ported directly from the deleted org-wide
+    pages, now reading the campaign-scoped queries instead. Default tab
+    changed from "accounts" to "overview". The `TabsList` (now 7 tabs) is
+    wrapped in `overflow-x-auto`, matching the pattern already used
+    elsewhere for tab rows that can overflow at narrow widths.
+  - `/accounts`, `/signals`, `/contacts` (the old org-wide list pages) are
+    now redirect stubs to `/campaigns` -- deleting them outright would 404
+    any bookmarked or externally linked URL; a redirect degrades
+    gracefully instead. The single-account detail page (`/accounts/[id]`)
+    was untouched and already linked back to `/campaigns/[id]`, not the
+    removed list page.
+  - `dashboard-shell.tsx`'s sidebar nav dropped the Accounts/Signals/Contacts
+    entries -- Overview, Campaigns, Reports, Settings remain.
+  - Verified with real components against fixture data on a temporary,
+    auth-excluded preview route (this sandbox has no live Postgres to
+    render the real DB-backed pages against) -- screenshotted at desktop
+    and mobile widths, confirmed the campaign-card grid collapses to a
+    single column and both status badges and hot/warm/emerging counts
+    stay legible at 390px, then deleted the preview route, reverted the
+    temporary proxy.ts matcher change, and uninstalled the
+    temporarily-reinstalled `playwright-core` dev dependency before
+    committing. `tsc`, `lint`, `vitest` (81/81), and a full production
+    build (all 26 routes) all pass. Not verified against a live database
+    -- in particular, `getCampaignSummaries`'s in-memory partitioning
+    across a real multi-campaign, multi-account organization is worth a
+    manual pass once there's a live Postgres to test against.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds

@@ -229,7 +229,7 @@ src/lib/auth/           -- signup + password-reset rate limiting, password-reset
 src/lib/analytics/       -- product analytics seam
 src/lib/db/               -- Drizzle schema, client, query helpers
 legal/                      -- Terms/Privacy source, rendered at /terms and /privacy
-src/app/(dashboard)/          -- Overview, Campaigns, Accounts, Signals, Contacts, Reports, Settings
+src/app/(dashboard)/          -- Overview (campaign picker), Campaigns (each with its own Overview/Accounts/Contacts/Signals/Offering DNA/ICP/Signal Taxonomy tabs), Reports, Settings
 src/app/api/                    -- campaigns, agent-pipeline trigger, reports, auth, billing
 ```
 

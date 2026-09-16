@@ -39,39 +39,33 @@ export async function getOwnedCampaign(campaignId: string, organizationId: strin
   return campaign ?? null;
 }
 
-export async function getDashboardData(organizationId: string) {
-  const orgCampaigns = await db.select().from(campaigns).where(eq(campaigns.organizationId, organizationId));
-  const campaignIds = orgCampaigns.map((c) => c.id);
-  if (campaignIds.length === 0) {
-    return { campaigns: [], accounts: [], topAccounts: [], latestSignals: [], kpis: emptyKpis() };
-  }
+export interface AccountKpis {
+  accountsAnalyzed: number;
+  accountsWithVerifiedSignal: number;
+  activeIntentAccounts: number;
+  highPriorityAccounts: number;
+  decisionMakersIdentified: number;
+  hot: number;
+  warm: number;
+  emerging: number;
+}
 
-  const orgAccounts = await db.select().from(accounts).where(inArray(accounts.campaignId, campaignIds));
-  const accountIds = orgAccounts.map((a) => a.id);
-  const scores = accountIds.length
-    ? await db.select().from(accountScores).where(inArray(accountScores.accountId, accountIds))
-    : [];
-  const scoreByAccount = new Map(scores.map((s) => [s.accountId, s]));
+type AccountWithScore = typeof accounts.$inferSelect & { score: typeof accountScores.$inferSelect | null };
 
-  const signals = accountIds.length
-    ? await db.select().from(accountSignals).where(inArray(accountSignals.accountId, accountIds))
-    : [];
-
-  const contactRows = accountIds.length
-    ? await db.select().from(contacts).where(inArray(contacts.accountId, accountIds))
-    : [];
-
-  const accountsWithScore = orgAccounts
-    .map((a) => ({ ...a, score: scoreByAccount.get(a.id) ?? null }))
-    .sort((a, b) => (b.score?.opportunity ?? 0) - (a.score?.opportunity ?? 0));
-
-  const topAccounts = accountsWithScore.slice(0, 8);
-
-  const latestSignals = [...signals]
-    .sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime())
-    .slice(0, 10)
-    .map((s) => ({ ...s, account: orgAccounts.find((a) => a.id === s.accountId) }));
-
+/**
+ * The KPI formula itself -- pulled out so it's computed identically
+ * whether it's being applied across one campaign's accounts
+ * (getCampaignAnalytics) or run once per campaign over a shared fetch
+ * (getCampaignSummaries). Previously this only ever ran once, blended
+ * across every campaign in the org on a single /overview page -- which
+ * read as meaningful comparison ("12 hot accounts") when the accounts
+ * being compared belonged to entirely different offerings and ICPs with
+ * their own scoring context. A "hot" account in one campaign isn't
+ * commensurable with a "hot" account in another; blending them into one
+ * number was the actual bug, not a UI problem. See
+ * docs/launch-checklist.md for the redesign this came from.
+ */
+function computeAccountKpis(accountsWithScore: AccountWithScore[], signals: (typeof accountSignals.$inferSelect)[], contactRows: (typeof contacts.$inferSelect)[]): AccountKpis {
   const decisionMakersIdentified = contactRows.filter((c) => c.isVerified).length;
   // Was `opportunity >= 70` / `>= 75` / `< 50`, chosen back when icpFit
   // ranged 45-90 (in practice always landing on 71.3 -- see
@@ -96,27 +90,21 @@ export async function getDashboardData(organizationId: string) {
   // Verification Agent could independently date and verify, reusing
   // `signals` already fetched above rather than a new query.
   const verifiedAccountIds = new Set(signals.filter((s) => s.verified).map((s) => s.accountId));
-  const accountsWithVerifiedSignal = orgAccounts.filter((a) => verifiedAccountIds.has(a.id)).length;
+  const accountsWithVerifiedSignal = accountsWithScore.filter((a) => verifiedAccountIds.has(a.id)).length;
 
   return {
-    campaigns: orgCampaigns,
-    accounts: accountsWithScore,
-    topAccounts,
-    latestSignals,
-    kpis: {
-      accountsAnalyzed: orgAccounts.length,
-      accountsWithVerifiedSignal,
-      activeIntentAccounts: activeIntent,
-      highPriorityAccounts: highPriority,
-      decisionMakersIdentified,
-      hot: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 68).length,
-      warm: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 55 && (a.score?.opportunity ?? 0) < 68).length,
-      emerging: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) < 55).length,
-    },
+    accountsAnalyzed: accountsWithScore.length,
+    accountsWithVerifiedSignal,
+    activeIntentAccounts: activeIntent,
+    highPriorityAccounts: highPriority,
+    decisionMakersIdentified,
+    hot: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 68).length,
+    warm: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 55 && (a.score?.opportunity ?? 0) < 68).length,
+    emerging: accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) < 55).length,
   };
 }
 
-function emptyKpis() {
+function emptyKpis(): AccountKpis {
   return {
     accountsAnalyzed: 0,
     accountsWithVerifiedSignal: 0,
@@ -126,6 +114,61 @@ function emptyKpis() {
     hot: 0,
     warm: 0,
     emerging: 0,
+  };
+}
+
+/**
+ * One row per campaign for the /overview picker -- each campaign's own
+ * KPIs, never blended with any other campaign's. One shared fetch across
+ * every account/signal/contact in the org (not a query per campaign in a
+ * loop), then partitioned in memory by campaignId -- the same number of
+ * round trips as the old org-wide getDashboardData, just grouped
+ * differently before it's returned.
+ */
+export async function getCampaignSummaries(organizationId: string) {
+  const orgCampaigns = await db.select().from(campaigns).where(eq(campaigns.organizationId, organizationId)).orderBy(desc(campaigns.createdAt));
+  if (orgCampaigns.length === 0) return [];
+
+  const campaignIds = orgCampaigns.map((c) => c.id);
+  const orgAccounts = await db.select().from(accounts).where(inArray(accounts.campaignId, campaignIds));
+  const accountIds = orgAccounts.map((a) => a.id);
+  const scores = accountIds.length ? await db.select().from(accountScores).where(inArray(accountScores.accountId, accountIds)) : [];
+  const scoreByAccount = new Map(scores.map((s) => [s.accountId, s]));
+  const signals = accountIds.length ? await db.select().from(accountSignals).where(inArray(accountSignals.accountId, accountIds)) : [];
+  const contactRows = accountIds.length ? await db.select().from(contacts).where(inArray(contacts.accountId, accountIds)) : [];
+
+  return orgCampaigns.map((campaign) => {
+    const campaignAccounts: AccountWithScore[] = orgAccounts
+      .filter((a) => a.campaignId === campaign.id)
+      .map((a) => ({ ...a, score: scoreByAccount.get(a.id) ?? null }));
+    const campaignAccountIds = new Set(campaignAccounts.map((a) => a.id));
+    const campaignSignals = signals.filter((s) => campaignAccountIds.has(s.accountId));
+    const campaignContacts = contactRows.filter((c) => campaignAccountIds.has(c.accountId));
+    return {
+      campaign,
+      kpis: campaignAccounts.length ? computeAccountKpis(campaignAccounts, campaignSignals, campaignContacts) : emptyKpis(),
+    };
+  });
+}
+
+/** The KPI/top-accounts view for a single campaign's own dashboard -- same formula as getCampaignSummaries, scoped to just this campaign. Null when the campaign doesn't exist or isn't this org's. */
+export async function getCampaignAnalytics(campaignId: string, organizationId: string) {
+  const campaign = await getOwnedCampaign(campaignId, organizationId);
+  if (!campaign) return null;
+
+  const campaignAccounts = await db.select().from(accounts).where(eq(accounts.campaignId, campaignId));
+  const accountIds = campaignAccounts.map((a) => a.id);
+  const scores = accountIds.length ? await db.select().from(accountScores).where(inArray(accountScores.accountId, accountIds)) : [];
+  const scoreByAccount = new Map(scores.map((s) => [s.accountId, s]));
+  const accountsWithScore: AccountWithScore[] = campaignAccounts.map((a) => ({ ...a, score: scoreByAccount.get(a.id) ?? null }));
+  const signals = accountIds.length ? await db.select().from(accountSignals).where(inArray(accountSignals.accountId, accountIds)) : [];
+  const contactRows = accountIds.length ? await db.select().from(contacts).where(inArray(contacts.accountId, accountIds)) : [];
+
+  const topAccounts = [...accountsWithScore].sort((a, b) => (b.score?.opportunity ?? 0) - (a.score?.opportunity ?? 0)).slice(0, 8);
+
+  return {
+    kpis: accountsWithScore.length ? computeAccountKpis(accountsWithScore, signals, contactRows) : emptyKpis(),
+    topAccounts,
   };
 }
 
@@ -300,26 +343,28 @@ export async function getOwnedReport(reportId: string, organizationId: string) {
   return { report, campaign };
 }
 
-export async function getAllSignals(organizationId: string) {
-  const orgCampaigns = await db.select().from(campaigns).where(eq(campaigns.organizationId, organizationId));
-  const campaignIds = orgCampaigns.map((c) => c.id);
-  if (campaignIds.length === 0) return [];
-  const orgAccounts = await db.select().from(accounts).where(inArray(accounts.campaignId, campaignIds));
-  const accountIds = orgAccounts.map((a) => a.id);
+/** Chronological signal feed for one campaign -- same shape as the old org-wide getAllSignals, scoped down. Null when the campaign doesn't exist or isn't this org's. */
+export async function getCampaignSignals(campaignId: string, organizationId: string) {
+  const campaign = await getOwnedCampaign(campaignId, organizationId);
+  if (!campaign) return null;
+
+  const campaignAccounts = await db.select().from(accounts).where(eq(accounts.campaignId, campaignId));
+  const accountIds = campaignAccounts.map((a) => a.id);
   if (accountIds.length === 0) return [];
   const signals = await db.select().from(accountSignals).where(inArray(accountSignals.accountId, accountIds));
   return [...signals]
     .sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime())
-    .map((s) => ({ ...s, account: orgAccounts.find((a) => a.id === s.accountId) }));
+    .map((s) => ({ ...s, account: campaignAccounts.find((a) => a.id === s.accountId) }));
 }
 
-export async function getAllContacts(organizationId: string) {
-  const orgCampaigns = await db.select().from(campaigns).where(eq(campaigns.organizationId, organizationId));
-  const campaignIds = orgCampaigns.map((c) => c.id);
-  if (campaignIds.length === 0) return [];
-  const orgAccounts = await db.select().from(accounts).where(inArray(accounts.campaignId, campaignIds));
-  const accountIds = orgAccounts.map((a) => a.id);
+/** Every contact for one campaign's accounts -- same shape as the old org-wide getAllContacts, scoped down. Null when the campaign doesn't exist or isn't this org's. */
+export async function getCampaignContacts(campaignId: string, organizationId: string) {
+  const campaign = await getOwnedCampaign(campaignId, organizationId);
+  if (!campaign) return null;
+
+  const campaignAccounts = await db.select().from(accounts).where(eq(accounts.campaignId, campaignId));
+  const accountIds = campaignAccounts.map((a) => a.id);
   if (accountIds.length === 0) return [];
   const contactRows = await db.select().from(contacts).where(inArray(contacts.accountId, accountIds));
-  return contactRows.map((c) => ({ ...c, account: orgAccounts.find((a) => a.id === c.accountId) }));
+  return contactRows.map((c) => ({ ...c, account: campaignAccounts.find((a) => a.id === c.accountId) }));
 }

@@ -5,9 +5,6 @@ import Link from "next/link";
 import {
   LayoutGrid,
   Megaphone,
-  Building2,
-  Radio,
-  Users,
   FileText,
   Settings,
   LogOut,
@@ -16,12 +13,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Accounts/Signals/Contacts used to be global, org-wide pages here --
+// removed along with their org-wide queries once a campaign became the
+// unit of analysis (see /overview and /campaigns/[id]'s own comments):
+// each campaign's own accounts/signals/contacts now live as tabs on that
+// campaign's dashboard instead of a separate cross-campaign page.
 const NAV = [
   { href: "/overview", label: "Overview", icon: LayoutGrid },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/accounts", label: "Accounts", icon: Building2 },
-  { href: "/signals", label: "Signals", icon: Radio },
-  { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
