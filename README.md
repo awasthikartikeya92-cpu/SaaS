@@ -145,6 +145,29 @@ didn't run:
   exactly as before across all three: a verified name only ever comes from
   one of these deterministic lookups, never from the LLM. See
   `src/lib/contacts/`.
+- **Discovered accounts are verified against the campaign's target
+  industries, not just labeled with them.** Research's own entity
+  resolution (a domain-derived company name from whatever page ranked for
+  a search query) has no industry filter behind it -- a talent marketplace
+  can surface under a "Banking & Finance" campaign, and previously nothing
+  caught that; the account was just labeled with the campaign's own target
+  industry regardless. A per-account firmographics lookup
+  (`src/lib/firmographics/`, reuses `TAVILY_API_KEY` -- no separate key
+  needed) now runs before Contact/GTM: it finds and cites a real source for
+  the company's actual industry, employee range, and revenue range, and
+  excludes the account outright (marked `failed`, with why, same mechanism
+  as any other per-account failure) when that source clearly contradicts
+  every target industry. Unconfigured, accounts keep the same
+  placeholder-labeled behavior as before.
+- **Signal confidence is a real weighted score now, not two constants.**
+  Every source used to land on exactly 0.78 (dated) or 0.55 (undated)
+  confidence -- correct as a floor, but visibly wrong once a user saw every
+  single signal on every account showing the identical percentage.
+  `src/lib/agents/verification-agent.ts` now combines recency, source
+  trust (a small allow-list of wire services/major business press), excerpt
+  substance, and presence of concrete checkable detail (a dollar figure, a
+  percentage, a year) into one deterministic score -- still no model call,
+  still fully explainable, just no longer flattened to two buckets.
 - **PDF/DOCX/CSV export buttons are present but disabled.** Report
   *content* generation works now (`/reports`); file export doesn't yet.
 - **Scoring weights are read-only** in Settings -- the formula already
@@ -221,6 +244,7 @@ item 0 for why it shouldn't stay wired into every deploy long-term.
 src/lib/ai/          -- provider interface + per-agent model selection (Anthropic default, OpenAI stub)
 src/lib/research/    -- Research provider interface (mock by default; real Tavily/SEC EDGAR auto-detected from credentials)
 src/lib/contacts/    -- Contact enrichment: team-page scrape (free), Google-search OSINT (free tier), Hunter.io (commercial) -- all opt-in, composable
+src/lib/firmographics/ -- Per-account industry/size/revenue verification (Tavily search + grounded LLM extraction), auto-detected from TAVILY_API_KEY
 src/lib/email/        -- Email provider interface (console log by default; real delivery via Resend)
 src/lib/agents/      -- one file per agent + orchestrator.ts
 src/lib/scoring/      -- deterministic scoring engine
@@ -249,7 +273,13 @@ this was built in, same restriction noted throughout this codebase):
   values) and the defensive Zod primitives (0-100 -> 0-1 confidence
   coercion, graceful degradation on a wrong-shaped field).
 - `src/lib/agents/verification-agent.ts` -- the deterministic evidence
-  filter (source URL + excerpt length required) and confidence assignment.
+  filter (source URL + excerpt length required) and the weighted confidence
+  formula (recency, source trust, excerpt substance, concrete detail) --
+  including a regression test proving two differently-sourced signals no
+  longer land on the same confidence, the exact bug this replaced.
+- `src/lib/firmographics/index.ts` -- the provider auto-detection logic
+  (same TAVILY_API_KEY-inference pattern as research/index.ts, plus an
+  explicit `FIRMOGRAPHICS_PROVIDER=none` opt-out).
 - `src/lib/agents/stage-decision.ts` -- the resumable pipeline's core
   decision (done / in-flight / not-started), pulled out of
   `orchestrator.ts` specifically so it's testable without a live DB

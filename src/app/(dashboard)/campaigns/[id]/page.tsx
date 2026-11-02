@@ -86,23 +86,51 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
 
       {stillGenerating && <GenerationProgress campaignId={id} initial={progress} />}
 
-      {campaign.status === "active" && progress.failedAccounts.length > 0 && (
-        <Card className="border-l-4 border-l-tier-2">
-          <CardContent className="flex gap-3 pt-5 text-sm">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-tier-2" />
-            <div>
-              <p className="font-medium text-ink">
-                {progress.failedAccounts.length} of {progress.accountsTotal} account
-                {progress.accountsTotal === 1 ? "" : "s"} couldn&apos;t be fully processed.
-              </p>
-              <p className="mt-1 text-xs text-ink-soft">
-                Everything else below completed normally -- one account failing doesn&apos;t affect the others.
-                Affected: {progress.failedAccounts.map((a) => a.companyName).join(", ")}.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {campaign.status === "active" && progress.failedAccounts.length > 0 && (() => {
+        // Two different reasons land on the same "failed" status --
+        // deliberately excluded (firmographics verification found this
+        // company doesn't actually belong to the campaign's target
+        // industries, see orchestrator.ts's stepContact) versus a genuine
+        // technical failure (a timeout, an API error). Worth separating in
+        // the copy: one is the pipeline doing its job correctly, the other
+        // is something that actually went wrong.
+        const excluded = progress.failedAccounts.filter((a) => a.reason?.startsWith("Excluded:"));
+        const errored = progress.failedAccounts.filter((a) => !a.reason?.startsWith("Excluded:"));
+        return (
+          <Card className="border-l-4 border-l-tier-2">
+            <CardContent className="flex gap-3 pt-5 text-sm">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-tier-2" />
+              <div className="flex flex-col gap-2">
+                {excluded.length > 0 && (
+                  <div>
+                    <p className="font-medium text-ink">
+                      {excluded.length} account{excluded.length === 1 ? "" : "s"} excluded -- didn&apos;t match this
+                      campaign&apos;s target industries.
+                    </p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      {excluded.map((a) => a.companyName).join(", ")}. This is the pipeline correctly filtering
+                      accounts, not a failure -- see each one&apos;s tooltip in the Accounts tab for the detected
+                      industry.
+                    </p>
+                  </div>
+                )}
+                {errored.length > 0 && (
+                  <div>
+                    <p className="font-medium text-ink">
+                      {errored.length} of {progress.accountsTotal} account{progress.accountsTotal === 1 ? "" : "s"}{" "}
+                      couldn&apos;t be fully processed.
+                    </p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      Everything else below completed normally -- one account failing doesn&apos;t affect the others.
+                      Affected: {errored.map((a) => a.companyName).join(", ")}.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {campaign.status === "failed" && (
         <Card className="border-l-4 border-l-negative">
@@ -207,6 +235,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                 <TableRow>
                   <TableHead>Company</TableHead>
                   <TableHead>Industry</TableHead>
+                  <TableHead>Size / revenue</TableHead>
                   <TableHead className="text-right">ICP fit</TableHead>
                   <TableHead className="text-right">Intent</TableHead>
                   <TableHead className="text-right">Opportunity</TableHead>
@@ -217,8 +246,20 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                   <TableRow key={a.id}>
                     <TableCell>
                       <Link href={`/accounts/${a.id}`} className="font-medium hover:text-accent">{a.companyName}</Link>
+                      {a.website && <p className="text-xs text-ink-soft">{a.website}</p>}
                     </TableCell>
                     <TableCell className="text-ink-soft">{a.industry ?? "--"}</TableCell>
+                    <TableCell className="text-xs text-ink-soft">
+                      {a.employeeRange || a.revenueRange ? (
+                        <>
+                          {a.employeeRange}
+                          {a.employeeRange && a.revenueRange && " / "}
+                          {a.revenueRange}
+                        </>
+                      ) : (
+                        "--"
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-[var(--font-data)]">{a.score?.icpFit.toFixed(0) ?? "--"}</TableCell>
                     <TableCell className="text-right font-[var(--font-data)]">{a.score?.intent.toFixed(0) ?? "--"}</TableCell>
                     <TableCell className="text-right">
@@ -229,7 +270,7 @@ export default async function CampaignDetailPage({ params }: { params: Promise<{
                       {a.status === "done" ? (
                         <OpportunityScore value={a.score?.opportunity ?? 0} />
                       ) : (
-                        <Badge variant={a.status === "failed" ? "negative" : "accent"}>
+                        <Badge variant={a.status === "failed" ? "negative" : "accent"} title={a.failureReason ?? undefined}>
                           {ACCOUNT_STATUS_LABEL[a.status] ?? a.status}
                         </Badge>
                       )}

@@ -31,15 +31,17 @@ import { getGenerationProgress, type GenerationProgress } from "@/lib/db/queries
 import { decideStageAction } from "./stage-decision";
 import { getContactEnrichmentProvider, type EnrichedContact } from "@/lib/contacts";
 import { pickBestContact } from "@/lib/contacts/rank";
+import { getFirmographicsProvider } from "@/lib/firmographics";
 
 // Registered once per process. Every AiProvider.complete() call reports
 // through this sink when it runs inside the withAiUsageContext() below.
 setAiUsageSink(recordAiUsageEvent);
 
 // How many discovered companies actually get turned into accounts, most-
-// corroborated first. This still bounds cost (each account is 2 LLM calls),
-// just not wall-clock time within a single request anymore -- see the
-// module comment below for why that distinction now matters.
+// corroborated first. This still bounds cost (each account is up to 3 LLM
+// calls: firmographics verification, contact, GTM), just not wall-clock
+// time within a single request anymore -- see the module comment below for
+// why that distinction now matters.
 const MAX_ACCOUNTS_PER_CAMPAIGN = Number(process.env.MAX_ACCOUNTS_PER_CAMPAIGN || 10);
 
 /**
@@ -387,7 +389,17 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
       // this stage, not a partial, silently-duplicating set.
       await db.transaction(async (tx) => {
         for (const [companyName, signalsForCompany] of companiesToProcess) {
-          const industry = icp.industries[0] ?? null; // Phase 1: no firmographic enrichment yet (see README)
+          // A labeling placeholder, not a real classification -- this stage
+          // is synchronous and deliberately has no LLM call in it at all
+          // (see this function's own comment), so there's no way yet to
+          // independently verify which industry this company actually
+          // operates in. stepContact's verifyIndustryAndEnrichFirmographics
+          // overwrites this with a real, sourced answer (and excludes the
+          // account outright if that answer contradicts every target
+          // industry) the first time this account is processed, one
+          // account later in the pipeline -- see its own comment for why
+          // that couldn't happen here instead.
+          const industry = icp.industries[0] ?? null;
           const [account] = await tx
             .insert(accounts)
             .values({
@@ -440,19 +452,17 @@ async function stepResearchAndSeedAccounts(campaign: typeof campaigns.$inferSele
           }
 
           const icpFit = computeIcpFit({
-            // `industry` above is always icp.industries[0] -- there's no
-            // firmographic enrichment connected yet to independently verify
-            // which industry an account actually operates in (see
-            // docs/launch-checklist.md's SEC EDGAR/firmographics roadmap
-            // item). The previous `icp.industries.includes(industry) ? 90 :
-            // 45` check was tautological -- industry was assigned FROM that
-            // exact array moments earlier, so it was always true, always 90,
-            // on every single account in every campaign, while looking like
-            // a real per-account comparison. Flattened to the same honest,
-            // clearly-labeled placeholder as the sub-scores below rather
-            // than a check that's always true dressed up as a real one --
-            // until real firmographic data exists to genuinely tell
-            // accounts apart on this dimension.
+            // `industry` above is always icp.industries[0] at this point in
+            // the pipeline (see its own comment) -- the previous
+            // `icp.industries.includes(industry) ? 90 : 45` check was
+            // tautological, always true, always 90, on every account in
+            // every campaign, while looking like a real per-account
+            // comparison. Flattened to the same honest, clearly-labeled
+            // placeholder as the sub-scores below; stepContact's
+            // verifyIndustryAndEnrichFirmographics recomputes this same
+            // icpFit with a real industryMatch once it has a genuine,
+            // sourced answer for this account (or excludes the account
+            // outright if that answer is a clear mismatch).
             industryMatch: 65,
             geographyMatch: 65, // Phase 1: no geo enrichment on mock accounts yet
             sizeMatch: 65,
@@ -546,10 +556,99 @@ function extractDomain(website: string): string | null {
   }
 }
 
+/**
+ * Runs the real firmographics lookup (src/lib/firmographics/) for one
+ * account, persists whatever it finds (industry, size/revenue ranges, the
+ * source it came from), and -- the actual fix, not just a label --
+ * excludes the account outright when the lookup confidently says its real
+ * industry doesn't belong in this campaign's target industries, instead of
+ * silently keeping it under a placeholder label. Returns:
+ * - the account's real, verified industry (string) to use for the rest of
+ *   this step, once a lookup succeeds and the industry is a plausible match
+ * - `account.industry` (the seed-time placeholder, or null) unchanged when
+ *   no provider is configured or the lookup couldn't determine an answer --
+ *   the honest "we don't know any better yet" case
+ * - the literal string "excluded" when the account has just been marked
+ *   failed and the caller must stop processing it
+ */
+async function verifyIndustryAndEnrichFirmographics(
+  account: typeof accounts.$inferSelect,
+  targetIndustries: string[]
+): Promise<string | null | "excluded"> {
+  const provider = getFirmographicsProvider();
+  if (!provider) return account.industry;
+
+  const result = await provider.lookup({
+    companyName: account.companyName,
+    website: account.website,
+    targetIndustries,
+  });
+  if (!result) return account.industry;
+
+  await db
+    .update(accounts)
+    .set({
+      industry: result.industry,
+      employeeRange: result.employeeRange,
+      revenueRange: result.revenueRange,
+      firmographicsSourceUrl: result.sourceUrl,
+      firmographicsSourceExcerpt: result.sourceExcerpt,
+    })
+    .where(eq(accounts.id, account.id));
+
+  if (!result.industryMatchesTarget) {
+    await db
+      .update(accounts)
+      .set({
+        status: "failed",
+        failureReason: `Excluded: this account's actual industry ("${result.industry}") doesn't match this campaign's target industries (${targetIndustries.join(", ") || "none specified"}).`,
+      })
+      .where(eq(accounts.id, account.id));
+    return "excluded";
+  }
+
+  // icpFit's industryMatch was a flat 65 placeholder at seed time -- no
+  // firmographic data existed yet to compare against. Recompute now that
+  // there's a real, sourced answer, same sub-scores otherwise (still
+  // placeholders -- see stepResearchAndSeedAccounts's own comment -- until
+  // geography/size/business-model/tech enrichment exist too).
+  const [score] = await db.select().from(accountScores).where(eq(accountScores.accountId, account.id)).limit(1);
+  if (score) {
+    const icpFit = computeIcpFit({
+      industryMatch: 90,
+      geographyMatch: 65,
+      sizeMatch: 65,
+      businessModelMatch: 65,
+      techEnvironmentMatch: 60,
+      problemRelevance: 70,
+    });
+    await db.update(accountScores).set({ icpFit }).where(eq(accountScores.accountId, account.id));
+  }
+
+  return result.industry;
+}
+
 async function stepContact(campaign: typeof campaigns.$inferSelect, account: typeof accounts.$inferSelect) {
   try {
     const { offeringDna, icp } = await loadOfferingAndIcp(account.campaignId);
     const personaTitles = offeringDna.personas.map((p) => p.title);
+
+    // Firmographic verification, once per account, before any further
+    // enrichment spends tokens on a company that doesn't actually belong in
+    // this campaign's account universe. This couldn't run back in
+    // stepResearchAndSeedAccounts: that stage is synchronous and
+    // deliberately has no LLM call in it at all (see its own comment) --
+    // industry there was always just icp.industries[0], a labeling
+    // placeholder, not a real check, which is exactly how a talent
+    // marketplace like Freelancer.com could surface as an account under a
+    // "Banking & Finance" campaign: Tavily's search + the domain-derived
+    // company name (see tavily-provider.ts's own comment on that heuristic)
+    // has no actual industry filter behind it, and nothing downstream
+    // verified the guess before this. Here, one account at a time, there's
+    // room for a real lookup + a cheap model call without threatening the
+    // per-request time budget.
+    const industry = await verifyIndustryAndEnrichFirmographics(account, icp.industries);
+    if (industry === "excluded") return;
 
     // Real enrichment first, LLM-recommended title as the fallback -- never
     // the other way around. A verified person only ever comes from
@@ -575,7 +674,7 @@ async function stepContact(campaign: typeof campaigns.$inferSelect, account: typ
       const { output: contactOut } = await logRun(
         account.campaignId,
         "contact-agent",
-        () => runContactAgent({ companyName: account.companyName, industry: account.industry, offeringDna, icp }),
+        () => runContactAgent({ companyName: account.companyName, industry, offeringDna, icp }),
         campaign.organizationId
       );
       contact = contactOut as Awaited<ReturnType<typeof runContactAgent>>;
@@ -622,9 +721,16 @@ async function stepContact(campaign: typeof campaigns.$inferSelect, account: typ
     // of the queue -- mark just this account "failed" (with why, for the
     // UI) and move on; the next call to runNextStep() picks up the next
     // pending/contacted account normally.
+    //
+    // Not always literally contact-agent anymore -- firmographics
+    // verification runs in this same try block now -- but this label only
+    // ever fires on a genuinely unexpected error (a DB write failing, a
+    // provider throwing outside its own documented never-throws contract),
+    // not the normal "excluded"/no-provider/no-answer paths above, which
+    // all return before reaching here.
     await db
       .update(accounts)
-      .set({ status: "failed", failureReason: `contact-agent: ${String(err)}` })
+      .set({ status: "failed", failureReason: `account processing: ${String(err)}` })
       .where(eq(accounts.id, account.id));
   }
 }

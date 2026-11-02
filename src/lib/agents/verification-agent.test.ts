@@ -39,14 +39,47 @@ describe("runVerificationAgent", () => {
     expect(dated.confidence).toBeGreaterThan(undated.confidence);
   });
 
-  it("never invents a confidence outside a conservative, deterministic range", () => {
-    // Nothing here is model-guessed -- it's a fixed lookup, not a
-    // continuous score, so both values should be exactly one of the two
-    // documented constants, not something in between.
-    const [dated] = runVerificationAgent([mkEvidence({ publishedAt: "2026-01-01" })]);
-    const [undated] = runVerificationAgent([mkEvidence({ publishedAt: undefined })]);
-    expect(dated.confidence).toBe(0.78);
-    expect(undated.confidence).toBe(0.55);
+  it("stays within a conservative, documented range regardless of inputs", () => {
+    // Nothing here is model-guessed -- every input below is a plain
+    // deterministic formula -- but it's a continuous weighted score now,
+    // not a two-value lookup, so this checks the bounds rather than an
+    // exact constant.
+    const results = runVerificationAgent([
+      mkEvidence({ publishedAt: "2026-01-01", url: "https://reuters.com/a", excerpt: "x".repeat(500) + " $10M 2026" }),
+      mkEvidence({ publishedAt: undefined, url: "https://unknown-blog.example/a", excerpt: "a".repeat(21) }),
+    ]);
+    for (const r of results) {
+      expect(r.confidence).toBeGreaterThanOrEqual(0.3);
+      expect(r.confidence).toBeLessThanOrEqual(0.95);
+    }
+  });
+
+  it("scores a recent, high-trust, detailed source higher than a thin one -- not the same flat number for every source", () => {
+    // This is the exact bug being fixed: every source used to land on
+    // identical confidence (0.78) regardless of how different the
+    // underlying evidence actually was.
+    const strong = mkEvidence({
+      publishedAt: new Date().toISOString(),
+      url: "https://reuters.com/business/acme-raises-50m",
+      excerpt: "Acme Corp announced a $50M Series C round in 2026, tripling headcount. " + "Additional detail. ".repeat(20),
+    });
+    const weak = mkEvidence({
+      publishedAt: undefined,
+      url: "https://random-aggregator.example/post/1",
+      excerpt: "Acme Corp mentioned in passing on a blog somewhere.",
+    });
+    const [strongResult] = runVerificationAgent([strong]);
+    const [weakResult] = runVerificationAgent([weak]);
+    expect(strongResult.confidence).toBeGreaterThan(weakResult.confidence);
+    expect(strongResult.confidence).not.toBe(weakResult.confidence);
+  });
+
+  it("gives a recency bonus that decays with age", () => {
+    const recent = mkEvidence({ publishedAt: new Date().toISOString() });
+    const old = mkEvidence({ publishedAt: "2015-01-01" });
+    const [recentResult] = runVerificationAgent([recent]);
+    const [oldResult] = runVerificationAgent([old]);
+    expect(recentResult.confidence).toBeGreaterThan(oldResult.confidence);
   });
 
   it("processes a mixed batch, keeping only what clears verification", () => {

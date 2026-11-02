@@ -177,6 +177,22 @@ export const accounts = pgTable(
     industry: text("industry"),
     employeeCount: integer("employee_count"),
     geography: text("geography"),
+    // Populated by the per-account firmographics lookup in
+    // orchestrator.ts's stepContact (src/lib/firmographics/) -- ranges, not
+    // a fake-precise number, since that's genuinely what a public search
+    // result gives you ("51-200 employees", "$10M-$50M revenue"), never
+    // invented when the source doesn't say. Null until that lookup runs
+    // (no provider configured, or it couldn't determine an answer) --
+    // exactly like every other "not yet enriched" nullable field here, not
+    // a sentinel value.
+    employeeRange: text("employee_range"),
+    revenueRange: text("revenue_range"),
+    // The "with proof" the UI cites next to employeeRange/revenueRange --
+    // both null together with those fields, both set together when the
+    // lookup succeeds. A URL alone isn't enough to show real accountability
+    // for a claim without also showing what it actually said.
+    firmographicsSourceUrl: text("firmographics_source_url"),
+    firmographicsSourceExcerpt: text("firmographics_source_excerpt"),
     // Per-account leg of the resumable generation pipeline (see
     // src/lib/agents/orchestrator.ts). A row is inserted as "pending" as
     // soon as research/verification identifies the company -- before

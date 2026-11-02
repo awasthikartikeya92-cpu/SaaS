@@ -37,6 +37,10 @@ const AGENT_MODELS: Record<string, string> = {
   // that are already written on a page, not generating anything, so the
   // same cost/quality trade as contact-agent applies here too.
   "contact-page-extraction": FAST_MODEL,
+  // src/lib/firmographics/tavily-firmographics-provider.ts -- classifying
+  // an industry match and extracting size/revenue from given search-result
+  // text, not generating anything -- same trade as contact-page-extraction.
+  "firmographics-agent": FAST_MODEL,
 };
 
 export function getModelForAgent(agent: keyof typeof AGENT_MODELS): string {

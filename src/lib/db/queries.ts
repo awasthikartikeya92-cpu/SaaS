@@ -69,17 +69,19 @@ function computeAccountKpis(accountsWithScore: AccountWithScore[], signals: (typ
   const decisionMakersIdentified = contactRows.filter((c) => c.isVerified).length;
   // Was `opportunity >= 70` / `>= 75` / `< 50`, chosen back when icpFit
   // ranged 45-90 (in practice always landing on 71.3 -- see
-  // src/lib/scoring/index.ts). icpFit is now an honestly-labeled flat 65
-  // placeholder until real firmographic data exists to genuinely
-  // differentiate accounts on it, which narrowed the achievable opportunity
-  // range to roughly 54-73 (intent and reachability now do all the real
-  // differentiating -- see computeReachability/computeRoleRelevance).
-  // Recalibrated so all three tiers are actually reachable against that
-  // real range instead of two of them sitting above the achievable
-  // ceiling. Revisit these numbers once firmographic enrichment ships and
-  // icpFit varies for real -- they're a judgment call against today's
-  // distribution, the same as the original numbers were, not a derived
-  // constant.
+  // src/lib/scoring/index.ts). icpFit's industryMatch sub-score is real now
+  // for accounts a firmographics lookup could actually verify (90 on a
+  // confirmed industry match, up from a flat 65 -- see orchestrator.ts's
+  // stepContact) and stays the same honestly-labeled 65 placeholder for the
+  // rest -- no provider configured, or the lookup couldn't determine an
+  // answer. The other five icpFit sub-scores are still flat placeholders
+  // either way, so the achievable opportunity range only shifted up
+  // slightly (roughly 54-76 now, was 54-73) rather than genuinely opening
+  // up -- not enough on its own to justify moving these thresholds again.
+  // Revisit once geography/size/business-model/tech enrichment exist too
+  // and icpFit varies for real across the board -- these are a judgment
+  // call against today's distribution, the same as the original numbers
+  // were, not a derived constant.
   const highPriority = accountsWithScore.filter((a) => (a.score?.opportunity ?? 0) >= 62).length;
   const activeIntent = accountsWithScore.filter((a) => (a.score?.intent ?? 0) >= 50).length;
   // "ICP matches" used to filter on icpFit >= 60 -- with icpFit currently a

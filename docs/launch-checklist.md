@@ -838,6 +838,113 @@ worked through top to bottom.
     structure or data -- it's presentation only, so the multi-tenancy and
     scoring logic this sits on top of are unaffected.
 
+- **Three data-quality bugs from a real campaign run, fixed at the root
+  cause rather than in the UI.** A user ran a real campaign (Banking &
+  Finance target industries, real Tavily research) and reported three
+  things that shouldn't have been possible: no company size/revenue shown
+  anywhere, every single signal showing identical 78% confidence, and
+  Freelancer.com (a talent marketplace) appearing as a discovered account.
+  All three traced back to the same underlying gap: this pipeline never had
+  a way to independently verify what a discovered company actually is,
+  only ways to label it with a placeholder and move on.
+  - **Confidence math** (`src/lib/agents/verification-agent.ts`): every
+    source used to score exactly 0.78 (had a publish date) or 0.55 (didn't)
+    -- a hardcoded two-value lookup dressed up as a per-source assessment.
+    Replaced with an actual weighted formula over four things this codebase
+    can honestly observe about a piece of evidence: recency (a claim from
+    last week matters more for timing than one from two years ago, decayed
+    in three bands), source trust (a short, conservative allow-list of wire
+    services and major business press -- reuters.com, bloomberg.com,
+    sec.gov, etc. -- get a bonus; nothing gets a penalty for being
+    unlisted), excerpt substance (length, as a rough proxy for
+    specificity), and presence of a concrete, checkable detail (a dollar
+    figure, a percentage, a year -- via regex, not verified further). Still
+    fully deterministic, still no model call in this step, still
+    explainable -- just a real distribution now instead of two buckets.
+    Rewrote `verification-agent.test.ts`'s "never invents a confidence
+    outside a conservative range" test, which had literally hardcoded
+    `expect(dated.confidence).toBe(0.78)` -- i.e. it was asserting the bug
+    as correct behavior -- into a bounds check, and added a regression test
+    proving a strong (recent, high-trust, detailed) source now scores
+    strictly higher than a weak one, which is the actual property that
+    matters here.
+  - **Industry verification, not just labeling** (`src/lib/firmographics/`,
+    new module, same interface/auto-detect/graceful-degradation shape as
+    `src/lib/research/` and `src/lib/contacts/`): the real root cause of
+    the Freelancer.com case. `stepResearchAndSeedAccounts` (the synchronous,
+    deliberately-no-LLM-call seeding stage) always set every discovered
+    account's `industry` to `icp.industries[0]` -- a labeling placeholder,
+    documented as such in its own comment, not a check. Combined with
+    Tavily's own entity-resolution heuristic (the company name comes from
+    the *domain of whatever page ranked* for a signal-plus-industry text
+    query, not from any structured company data -- see
+    `tavily-provider.ts`), there was no point in the whole pipeline where
+    "does this company actually operate in the target industry" was ever
+    asked, only assumed. Now, once per account (in `stepContact`, the
+    resumable per-account step -- this genuinely could not run inside the
+    synchronous seeding stage without threatening its per-request time
+    budget; see `verifyIndustryAndEnrichFirmographics`'s own comment), a
+    real search-plus-grounded-LLM-extraction lookup runs before Contact/GTM
+    spend any more tokens on the account: it finds a source, extracts the
+    company's real industry, employee range, and revenue range (grounded
+    extraction, same "never invent" discipline as
+    `team-page-provider.ts` -- null when the source doesn't say, never
+    guessed from the company name alone), and persists all of it with the
+    source URL/excerpt as proof. If the extracted industry contradicts
+    every target industry, the account is excluded outright: marked
+    `failed` with a clear `failureReason` (reusing the exact same
+    per-account failure mechanism already used for a technical error --
+    "one account's failure doesn't block the rest of the queue" already
+    held for the right reason, this is the same infrastructure serving a
+    new one), so it disappears from the account list instead of sitting
+    there mislabeled. `icpFit`'s `industryMatch` sub-score, previously a
+    flat 65 for every account (see `computeAccountKpis`'s own comment,
+    updated to reflect this), is recomputed to 90 for a confirmed match.
+    Reuses `TAVILY_API_KEY` -- no new credential required beyond what real
+    research already needs; `FIRMOGRAPHICS_PROVIDER=none` opts back out
+    independently of research if the extra per-account Tavily+LLM call
+    isn't wanted. Unconfigured, every account keeps exactly the previous
+    placeholder behavior -- this is additive, not a required stage.
+  - **Company size/revenue "with proof"**: the same firmographics lookup
+    populates `accounts.employeeRange`/`revenueRange` (ranges, e.g.
+    "51-200 employees", never a fabricated exact figure) plus
+    `firmographicsSourceUrl`/`firmographicsSourceExcerpt` as the "with
+    proof" the user asked for. Surfaced in three places: the campaign
+    detail page's Accounts tab (new "Size / revenue" column, plus a website
+    line under the company name), the account detail page (a summary line
+    under the header, "source" linking out with the excerpt as a hover
+    tooltip), and the partial-failure banner on the campaign page, which
+    now splits "excluded -- didn't match target industries" from "couldn't
+    be fully processed" instead of describing both as the same kind of
+    failure (one is the pipeline correctly filtering, the other is
+    something that actually broke).
+  - New migration `drizzle/0006_sticky_mesmero.sql` (four new nullable
+    `accounts` columns -- purely additive, no backfill needed for existing
+    rows). `vercel-build`'s `drizzle-kit push --force` (see item 0 below)
+    applies it automatically on the next deploy, same as every schema
+    change so far in this project.
+  - Verified: `tsc`, `lint`, `vitest` (87/87, including new
+    `verification-agent.test.ts` and `firmographics/index.test.ts` cases),
+    and a full production build (26 routes) all pass. The new UI (website
+    line, Size/revenue column, split exclusion/error banner, account-detail
+    firmographics line) was screenshotted against fixture data on a
+    temporary preview route, then cleaned up, same discipline as every
+    other UI change in this project. Not verified: a real Tavily response
+    for the firmographics search-and-extract prompt (same sandbox network
+    restriction noted throughout this codebase for Tavily/SEC EDGAR/Hunter
+    -- api.tavily.com is blocked here); the next real campaign run with
+    `TAVILY_API_KEY` set is the actual test, the same way the original
+    Tavily research provider's own comment already flags this. If
+    Freelancer.com (or anything like it) still shows up afterward, check
+    the account's own tooltip/detail page first -- it now says what
+    industry was actually detected and why it was or wasn't excluded,
+    which is the actual diagnostic this fix adds.
+  - **This is a redo.** The same fix was built and verified once already in
+    an earlier session, but the container reset before it was committed and
+    the work was lost -- this entry (and the code) is the replacement, from
+    scratch, not a continuation. Mentioned here only so a future reader
+    doesn't wonder why the git history doesn't show two attempts.
+
 ## What's still a manual step
 
 ### 0. Remove the bootstrap deploy hack once the first deploy succeeds

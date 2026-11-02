@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ExternalLink } from "lucide-react";
 import { auth } from "@/auth";
 import { getAccountDetail } from "@/lib/db/queries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,7 +29,42 @@ export default async function AccountDetailPage({ params }: { params: Promise<{ 
             <Link href={`/campaigns/${campaign?.id}`} className="hover:text-accent">{campaign?.name}</Link>
           </p>
           <h1 className="font-[var(--font-display)] text-2xl">{account.companyName}</h1>
-          <p className="text-sm text-ink-soft">{account.industry ?? "Industry unknown"} {account.geography ? `- ${account.geography}` : ""}</p>
+          <p className="text-sm text-ink-soft">
+            {account.industry ?? "Industry unknown"} {account.geography ? `- ${account.geography}` : ""}
+            {account.website && (
+              <>
+                {" "}
+                &middot;{" "}
+                <a
+                  href={account.website.startsWith("http") ? account.website : `https://${account.website}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  {account.website}
+                </a>
+              </>
+            )}
+          </p>
+          {(account.employeeRange || account.revenueRange) && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-soft">
+              {account.employeeRange && <span>{account.employeeRange}</span>}
+              {account.employeeRange && account.revenueRange && <span aria-hidden>&middot;</span>}
+              {account.revenueRange && <span>{account.revenueRange} revenue</span>}
+              {account.firmographicsSourceUrl && (
+                <a
+                  href={account.firmographicsSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 text-accent hover:underline"
+                  title={account.firmographicsSourceExcerpt ?? undefined}
+                >
+                  <ExternalLink className="size-3" />
+                  source
+                </a>
+              )}
+            </p>
+          )}
         </div>
         {score && (
           <div className="text-right">
