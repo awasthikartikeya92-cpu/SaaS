@@ -310,3 +310,9 @@ remaining pieces:
 2. **Everything in `docs/launch-checklist.md`'s "manual step" section** --
    real pricing once usage data exists, a Stripe account, legal review, and
    real signup-abuse prevention beyond the current IP throttle.
+
+## License
+
+Proprietary. All rights reserved by Intrendz Media -- see `LICENSE`. Not
+open source; no permission is granted to use, copy, or distribute this
+code without a separate written agreement.
